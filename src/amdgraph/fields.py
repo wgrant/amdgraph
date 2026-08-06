@@ -1,0 +1,167 @@
+"""Layer 0 -- the hardware map.
+
+Which byte of which sysfs blob holds which quantity, on this part. Every entry
+below was checked against live silicon rather than taken from a header, and the
+comments record how; they are the substance of this module. No logic, no
+imports from the rest of the package.
+"""
+
+PM_TABLE = "/sys/kernel/ryzen_smu_drv/pm_table"
+PM_VERSION = "/sys/kernel/ryzen_smu_drv/pm_table_version"
+
+# pm_table indices are FLOAT INDEX (byte offset / 4) for version 0x004C0009
+# (Phoenix / Hawk Point). The header scalars match RyzenAdj lib/api.c; the
+# clock and per-core blocks are the empirical map from ryzen_smu's
+# userspace/monitor_cpu.c, which located the Cezanne core-telemetry block at a
+# constant +313 shift. Every index below was re-checked against live hardware:
+# per-core C0+C1+C6 sums to 100%, mclk 800 / fclk 1600 matches LPDDR5-6400, and
+# the limit fields agree with `ryzenadj -i`.
+#
+# Other table versions place these elsewhere, so we decode nothing but this one
+# rather than print plausible garbage.
+PM_VER_SUPPORTED = 0x004C0009
+
+PM_SCALAR = {
+    # key                index  scale
+    "stapm":            (1,     1.0),
+    "stapm_lim":        (0,     1.0),
+    "ppt_fast":         (3,     1.0),
+    "ppt_fast_lim":     (2,     1.0),
+    "ppt_slow":         (5,     1.0),
+    "ppt_slow_lim":     (4,     1.0),
+    "ppt_apu":          (7,     1.0),
+    "ppt_apu_lim":      (6,     1.0),
+    "tdc":              (9,     1.0),
+    "tdc_lim":          (8,     1.0),
+    "tdc_soc":          (11,    1.0),
+    "tdc_soc_lim":      (10,    1.0),
+    "edc":              (13,    1.0),
+    "edc_lim":          (12,    1.0),
+    "edc_soc":          (15,    1.0),
+    "edc_soc_lim":      (14,    1.0),
+    "tctl":             (17,    1.0),
+    "tctl_lim":         (16,    1.0),
+    "thm_gfx":          (19,    1.0),
+    "thm_gfx_lim":      (18,    1.0),
+    "thm_soc":          (21,    1.0),
+    "thm_soc_lim":      (20,    1.0),
+    "stt":              (23,    1.0),
+    "stt_lim":          (22,    1.0),
+    "fit":              (27,    1.0),
+    "fit_lim":          (26,    1.0),
+    "vid":              (29,    1.0),
+    "vid_lim":          (28,    1.0),
+    # The instantaneous GFX clock; index 57 is its ceiling and reads a
+    # constant 2700, matching the top pp_dpm_sclk level.
+    #
+    # This was briefly mislabelled here as a "permitted" clock, on the strength
+    # of one reading of 2.67 GHz taken while amdgpu's freq1_input and
+    # pp_dpm_sclk both said 800. Watching it properly, index 56 tracks GPU
+    # activity and falls to exactly 800 when the GPU goes quiet -- it is the
+    # real clock, sampled instantaneously, and the disagreement is because
+    # freq1_input and pp_dpm_sclk report the coarse DPM *level*. Neither is
+    # more authoritative; they answer different questions, so both are plotted.
+    "gfx_clk":          (56,    1000.0),   # GHz -> MHz
+    "gfx_clk_max":      (57,    1000.0),
+    "fclk":             (89,    1.0),
+    "uclk":             (93,    1.0),
+    "mclk":             (97,    1.0),
+    "vddcr_soc":        (101,   1.0),
+    # Validated against known traffic rather than trusted. Driving reads with
+    # 1/2/4/8 processes each scanning a 128 MiB array (>> the 16 MiB L3) over a
+    # 32-41 GB/s range gives correlation +0.997 against index 194, and index
+    # 195 stays at its 0.17 idle baseline throughout -- so these are two
+    # genuinely separate counters, not one signal split in two. A copy
+    # workload then moves both together, as it should.
+    #
+    # Absolute scale lands at 0.94-0.99 of the known rate read as GiB/s against
+    # 0.88-0.92 read as GB/s, consistently at every load level, so the counters
+    # are binary units and the axis says GiB/s. The values are passed through
+    # unscaled -- the reading was always GiB/s; only the label was wrong.
+    "dram_rd":          (194,   1.0),
+    "dram_wr":          (195,   1.0),
+    "cldo_vddp":        (477,   1.0),
+}
+
+# Per-core arrays, 8 consecutive floats each, indexed by physical core.
+PM_CORE = {
+    "core_power":   (513,  1.0),
+    "core_volt":    (521,  1.0),
+    "core_temp":    (529,  1.0),
+    "core_freq":    (553,  1000.0),   # GHz -> MHz, actual P-state (shows boost)
+    "core_freqeff": (561,  1000.0),   # GHz -> MHz, gating-averaged
+    "core_c0":      (569,  1.0),
+    "core_cc6":     (585,  1.0),
+}
+N_CORES = 8
+
+CARD = "/sys/class/drm/card1/device"
+GPU_METRICS = f"{CARD}/gpu_metrics"
+
+# The SMU's own answer to "why am I being held back", which beats inferring it
+# from limits and values. amdgpu exports it in the gpu_metrics blob; this is
+# the same source amdgpu_top decodes.
+#
+# Bit meanings are ASIC-dependent and these are Phoenix's, taken from the
+# kernel that drives this part: smu13_driver_if_v13_0_4.h, reached via
+# amdgpu_smu.c IP_VERSION(13, 0, 4) / (13, 0, 11) -> smu_v13_0_4_set_ppt_funcs,
+# whose get_gpu_metrics does `gpu_metrics->throttle_status =
+# metrics.ThrottlerStatus`. Do not reuse this table for another ASIC.
+#
+# Offset 108 and the (2, 1) version guard below are specific to
+# gpu_metrics_v2_1, the 120-byte layout this machine reports. Later revisions
+# move the field and add an ASIC-independent bitmask, so we decode nothing but
+# the layout that was actually verified.
+GM_VERSION = (2, 1)
+GM_SIZE = 120
+GM_THROTTLE_OFF = 108
+
+# Power breakdown, from the same blob. Offsets are gpu_metrics_v2_1 as declared
+# in the kernel's kgd_pp_interface.h, not inferred:
+#   40 average_socket_power   42 average_cpu_power
+#   44 average_soc_power      46 average_gfx_power
+#   48 average_core_power[8]
+# All are milliwatts.
+#
+# Two of those are not usable on this part, checked rather than assumed:
+#   average_cpu_power reads a constant 0xFFFF -- unpopulated.
+#   average_gfx_power is NOT GPU power. It correlates +0.093 with gpu_busy and
+#   +0.943 with the sum of average_core_power, and its mean (10.90 W) sits
+#   within 6% of that sum (10.29 W). The SMU fills the gfx slot with CPU power
+#   here. It is recorded as pwr_gfxslot and deliberately not plotted as "GPU".
+#
+# What is trustworthy: socket_power, soc_power and the per-core array.
+# Cross-checked three ways at one instant -- RAPL package-0 (which is what
+# turbostat reads) 25.32 W, gpu_metrics socket_power 24.89 W, pm_table
+# ppt_slow 25.90 W: agreement within 4% between three independent paths. RAPL's
+# `core` domain reads 2.40 W, which is AMD's per-core MSR rather than a total;
+# x8 gives 19.2 W against pm_table's 19.50 W summed over the eight cores.
+#
+# RAPL is not sampled here: /sys/class/powercap/*/energy_uj is root-only, and
+# nothing else in this program needs privileges.
+GM_PWR_OFF = 40
+GM_CORE_PWR_OFF = 48
+
+THROTTLE_BITS = [
+    (0,  "SPL",         "power"),
+    (1,  "FPPT",        "power"),
+    (2,  "SPPT",        "power"),
+    (3,  "SPPT APU",    "power"),
+    (4,  "THM core",    "thermal"),
+    (5,  "THM GFX",     "thermal"),
+    (6,  "THM SoC",     "thermal"),
+    (7,  "TDC VDD",     "current"),
+    (8,  "TDC SoC",     "current"),
+    (9,  "PROCHOT CPU", "prochot"),
+    (10, "PROCHOT GFX", "prochot"),
+    (11, "EDC CPU",     "current"),
+    (12, "EDC GFX",     "current"),
+]
+TPACPI = "/sys/devices/platform/thinkpad_acpi"
+PLATFORM_PROFILE = "/sys/firmware/acpi/platform_profile"
+
+# Plotted as a step trace so a profile switch lines up against the power drop
+# it caused. Ordered by how much power each profile allows.
+PROFILES = {"low-power": 0.0, "quiet": 0.0, "cool": 0.0,
+            "balanced": 1.0, "balanced-performance": 1.5,
+            "performance": 2.0}
