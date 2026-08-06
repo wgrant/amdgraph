@@ -520,11 +520,22 @@ class Sampler:
                 w = read_num(f"{amd}/power1_input", 1_000_000)
             s["gpu_power"] = w
         if (tp := self.hwmon.get("thinkpad")):
-            # temp5 is the EC's TMP3 sensor -- the palm-rest skin temperature
-            # the firmware fan curve actually reacts to, and the closest EC
+            # temp5 is the EC's TMP3 sensor (EC RAM 0x7C) -- the palm-rest skin
+            # temperature the firmware fan curve reacts to, and the closest EC
             # analogue of the SMU's STT model. temp1 is its CPU sensor.
             s["ec_skin"] = read_num(f"{tp}/temp5_input", 1000)
             s["ec_cpu"] = read_num(f"{tp}/temp1_input", 1000)
+            # Only these two. temp1/3/6/7 all report the identical value and
+            # track each other exactly -- they are aliases of one CPU sensor,
+            # so the EC publishes just two distinct temperatures to Linux.
+            # Reading the other three would cost ~0.45 ms per sample of EC
+            # transactions for a third copy of a line already on the chart.
+            #
+            # This was checked while hunting the lap-mode trigger, which
+            # halves edc_lim (105 -> 52 A, ~8 W) and correlates with none of
+            # the sensors Linux can see. It is not hiding in an unread
+            # thermistor: there aren't any. The EC decides privately.
+            s["palm"] = read_num(f"{TPACPI}/palmsensor")
             s["fan1"] = read_num(f"{tp}/fan1_input")
             s["fan2"] = read_num(f"{tp}/fan2_input")
             s["fan_cmd"], s["fan_mode"] = self._fan_command(tp)
@@ -982,10 +993,10 @@ PANES = [
     # Step traces. Unitless on purpose -- these are states, not quantities, and
     # the only thing being read off them is when they change.
     PaneSpec("Platform state", "", [
+        ("lapmode", "lap mode", None),
+        ("palm", "palm sensor", None),
         ("pprof", "profile", None),
         ("ac_online", "AC", None),
-        ("batt_charging", "charging", None),
-        ("lapmode", "lap mode", None),
     ], height=90,
         note="profile 0=low-power 1=balanced 2=performance; a step = budget change"),
 ]
@@ -2517,7 +2528,7 @@ class Main(QMainWindow):
                  "core_power_sum", "cpu_busy", "gpu_busy", "sclk", "sclk_hw",
                  "socclk", "gpu_edge", "gpu_power", "ec_skin", "ec_cpu",
                  "fan1", "fan2", "fan_cmd", "nvme", "batt_power",
-                 "pprof", "ac_online", "batt_charging", "lapmode"]
+                 "pprof", "ac_online", "batt_charging", "lapmode", "palm"]
         seen, out = set(), []
         for k in keys:
             if k not in seen:
