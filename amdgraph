@@ -129,10 +129,10 @@ PM_SCALAR = {
     # genuinely separate counters, not one signal split in two. A copy
     # workload then moves both together, as it should.
     #
-    # Absolute scale lands at 0.94-0.99 of the known rate read as GiB/s, versus
-    # 0.88-0.92 read as GB/s, so the counters are more likely binary units; the
-    # residual few percent is within what this kind of measurement resolves.
-    # Treated as GB/s here, which is what the axis says and is right to ~10%.
+    # Absolute scale lands at 0.94-0.99 of the known rate read as GiB/s against
+    # 0.88-0.92 read as GB/s, consistently at every load level, so the counters
+    # are binary units and the axis says GiB/s. The values are passed through
+    # unscaled -- the reading was always GiB/s; only the label was wrong.
     "dram_rd":          (194,   1.0),
     "dram_wr":          (195,   1.0),
     "cldo_vddp":        (477,   1.0),
@@ -923,10 +923,10 @@ PANES = [
         ("vddcr_soc", "VDDCR_SOC", None),
         ("cldo_vddp", "cLDO_VDDP", None),
     ], floor0=False),
-    PaneSpec("DRAM bandwidth", "GB/s", [
+    PaneSpec("DRAM bandwidth", "GiB/s", [
         ("dram_rd", "read", None),
         ("dram_wr", "write", None),
-    ]),
+    ], note="peak here ≈ 95 GiB/s (6400 MT/s × 128-bit)"),
     PaneSpec("Fan command", "level", [
         ("fan_cmd", "commanded", None),
     ], height=76, note="8 = disengaged; blank = firmware auto"),
