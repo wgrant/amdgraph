@@ -122,6 +122,17 @@ PM_SCALAR = {
     "uclk":             (93,    1.0),
     "mclk":             (97,    1.0),
     "vddcr_soc":        (101,   1.0),
+    # Validated against known traffic rather than trusted. Driving reads with
+    # 1/2/4/8 processes each scanning a 128 MiB array (>> the 16 MiB L3) over a
+    # 32-41 GB/s range gives correlation +0.997 against index 194, and index
+    # 195 stays at its 0.17 idle baseline throughout -- so these are two
+    # genuinely separate counters, not one signal split in two. A copy
+    # workload then moves both together, as it should.
+    #
+    # Absolute scale lands at 0.94-0.99 of the known rate read as GiB/s, versus
+    # 0.88-0.92 read as GB/s, so the counters are more likely binary units; the
+    # residual few percent is within what this kind of measurement resolves.
+    # Treated as GB/s here, which is what the axis says and is right to ~10%.
     "dram_rd":          (194,   1.0),
     "dram_wr":          (195,   1.0),
     "cldo_vddp":        (477,   1.0),
