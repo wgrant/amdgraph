@@ -533,6 +533,9 @@ class Sampler:
             if pwr.get("pwr_socket") is not None:
                 s["pwr_rest"] = (pwr["pwr_socket"] - pwr.get("pwr_cores", 0.0)
                                  - (pwr.get("pwr_soc") or 0.0))
+        # pwr_cores (the gpu_metrics sum) stays recorded for comparison, but
+        # the plotted CPU-core figure is pm_table's core_power_sum -- see the
+        # jitter table above the Power breakdown pane.
         if duty is not None:
             s["throttle_raw"] = float(raw)
             s["throttle_n"] = float(n)
@@ -972,16 +975,31 @@ PANES = [
     # socket and cores carries the same information without pretending to a
     # precision that is not there, and the eye averages it better than a
     # difference trace does.
+    # Core power comes from pm_table, not from gpu_metrics, though both exist.
+    # Measured against socket_power over the same window:
+    #
+    #   source                jitter   exceeds socket   worst overshoot
+    #   gpu_metrics cores      3.92 W        42.7%           +14.09 W
+    #   pm_table cores         1.43 W        38.0%            +2.99 W
+    #
+    # 2.7x less sample-to-sample jitter and an overshoot bounded to a few
+    # watts rather than fourteen. Scanning every other pm_table index for an
+    # aggregate CPU-power field turned up nothing better -- only the per-core
+    # values themselves and IDDMAX.
+    #
+    # Neither is fully consistent with socket_power: cores + SoC exceeds it by
+    # ~1 W on average, which is systematic rather than noise and is not
+    # explained. Read the gap between socket and cores as indicative, not as a
+    # GPU measurement.
     PaneSpec("Power breakdown", "W", [
         ("pwr_socket", "socket total", None),
-        ("pwr_cores", "CPU cores", None),
+        ("core_power_sum", "CPU cores", None),
         ("pwr_soc", "SoC", None),
-    ], note="gap between socket and cores = GPU/PHY/fabric, not measured"),
+    ], note="gap ≈ GPU/PHY/fabric; cores can still overshoot socket by ~1 W"),
     PaneSpec("Rail power", "W", [
-        ("core_power_sum", "cores (pm_table)", None),
         ("gpu_power", "amdgpu hwmon", None),
         ("batt_power", "battery", None),
-    ], note="a second, independent view of the same power"),
+    ], note="independent views: driver-reported APU power, and DC draw"),
     PaneSpec("SMU temperature", "°C", [
         ("tctl", "Tctl", "tctl_lim"),
         ("stt", "STT skin", "stt_lim"),
