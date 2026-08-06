@@ -95,8 +95,13 @@ PM_CORE = {
 }
 N_CORES = 8
 
-CARD = "/sys/class/drm/card1/device"
-GPU_METRICS = f"{CARD}/gpu_metrics"
+# The amdgpu device is discovered, not named. It was hardcoded to card1 for as
+# long as this only ran on one machine, which is true there and false almost
+# everywhere else -- enumeration order depends on what else claims a DRM node,
+# so a second GPU, a different kernel or a different laptop moves it. A wrong
+# guess is silent: empty GPU panes and no cap reasons, with nothing to say why.
+DRM_DEVICES = "/sys/class/drm/card[0-9]*/device"
+AMD_VENDOR = "0x1002"
 
 # The SMU's own answer to "why am I being held back", which beats inferring it
 # from limits and values. amdgpu exports it in the gpu_metrics blob; this is

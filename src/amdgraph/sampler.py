@@ -11,12 +11,13 @@ import struct
 import threading
 import time
 
-from .fields import (CARD, GM_CORE_PWR_OFF, GM_PWR_OFF, GM_SIZE,
-                     GM_THROTTLE_OFF, GM_VERSION, GPU_METRICS, N_CORES,
+from .fields import (AMD_VENDOR, DRM_DEVICES, GM_CORE_PWR_OFF, GM_PWR_OFF,
+                     GM_SIZE, GM_THROTTLE_OFF, GM_VERSION, N_CORES,
                      PLATFORM_PROFILE, PM_CORE, PM_SCALAR, PM_TABLE,
                      PM_VERSION, PM_VER_SUPPORTED, PROFILES, THROTTLE_BITS,
                      TPACPI)
-from .sysfs import dpm_current, find_hwmon, read_num, read_text
+from .sysfs import (dpm_current, find_drm_device, find_hwmon, read_num,
+                    read_text)
 
 
 class CPUBusy:
@@ -60,7 +61,8 @@ class ThrottleSampler:
     but tunable, and set to 1 Hz it degrades to the old instantaneous sample.
     """
 
-    def __init__(self, hz=20.0):
+    def __init__(self, gpu_metrics, hz=20.0):
+        self.gpu_metrics = gpu_metrics
         self.hz = hz
         self._lock = threading.Lock()
         self._counts = {b: 0.0 for b, _n, _f in THROTTLE_BITS}
@@ -74,7 +76,7 @@ class ThrottleSampler:
         self._pwr = None
 
     def start(self):
-        if self._thread or self.hz <= 1.0:
+        if self._thread or self.hz <= 1.0 or not self.gpu_metrics:
             return
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, daemon=True)
@@ -99,7 +101,7 @@ class ThrottleSampler:
         nxt = time.monotonic()
         while not self._stop.is_set():
             try:
-                with open(GPU_METRICS, "rb") as f:
+                with open(self.gpu_metrics, "rb") as f:
                     raw = f.read()
                 ts = struct.unpack_from("<I", raw, GM_THROTTLE_OFF)[0]
             except (OSError, struct.error):
@@ -176,8 +178,10 @@ class Sampler:
         self.slow = {}
         self.pm_ok = False
         self.pm_note = ""
-        self.gm_ok, self.gm_note = self._check_gpu_metrics()
-        self.throttle = ThrottleSampler()
+        self.card = find_drm_device(DRM_DEVICES, AMD_VENDOR, "gpu_metrics")
+        self.gpu_metrics = (f"{self.card}/gpu_metrics" if self.card else None)
+        self.gm_ok, self.gm_note = self._check_gpu_metrics(self.gpu_metrics)
+        self.throttle = ThrottleSampler(self.gpu_metrics)
         if self.gm_ok:
             self.throttle.start()
         try:
@@ -195,12 +199,21 @@ class Sampler:
         self.pm_ok = True
 
     @staticmethod
-    def _check_gpu_metrics():
+    def _check_gpu_metrics(path):
         """Refuse to decode a layout we have not verified. The throttler bits
         are ASIC-dependent and the field moves between revisions, so a wrong
-        guess would label the wrong cap reason -- worse than showing none."""
+        guess would label the wrong cap reason -- worse than showing none.
+
+        The version reported here is worth reading rather than working around:
+        v2_2 and later carry indep_throttle_status, an ASIC-independent bitmask
+        the kernel fills in, and v3_0 replaces the bitmask with per-reason
+        residency counters. This build decodes v2_1, the one layout that has
+        neither and therefore needs the hand-checked bit table in fields.py.
+        """
+        if not path:
+            return False, "no amdgpu device found — no cap reasons"
         try:
-            with open(GPU_METRICS, "rb") as f:
+            with open(path, "rb") as f:
                 raw = f.read()
         except OSError:
             return False, "gpu_metrics unavailable — no cap reasons"
@@ -286,7 +299,7 @@ class Sampler:
                 s[f"thr{bit}"] = duty.get(bit, 0.0)
             return
         try:
-            with open(GPU_METRICS, "rb") as f:
+            with open(self.gpu_metrics, "rb") as f:
                 buf = f.read()
         except OSError:
             return
@@ -305,9 +318,10 @@ class Sampler:
         self._throttle(s)
 
         s["cpu_busy"] = self.cpubusy.sample()
-        s["gpu_busy"] = read_num(f"{CARD}/gpu_busy_percent")
-        s["sclk"] = dpm_current(f"{CARD}/pp_dpm_sclk")
-        s["socclk"] = dpm_current(f"{CARD}/pp_dpm_socclk")
+        if self.card:
+            s["gpu_busy"] = read_num(f"{self.card}/gpu_busy_percent")
+            s["sclk"] = dpm_current(f"{self.card}/pp_dpm_sclk")
+            s["socclk"] = dpm_current(f"{self.card}/pp_dpm_socclk")
 
         if (amd := self.hwmon.get("amdgpu")):
             s["gpu_edge"] = read_num(f"{amd}/temp1_input", 1000)
