@@ -721,22 +721,29 @@ PANES = [
         ("stapm_lim", "STAPM limit", None),
         ("ppt_slow_lim", "PPT slow limit", None),
     ], height=96, note="a step here = firmware changed the budget"),
-    # Settled limits measured across the three platform profiles here:
+    # Firmware limits per platform profile on this machine, measured with no
+    # ryzenadj override running:
     #
-    #   profile     stapm  ppt_fast  ppt_slow  stt_lim  tctl/gfx/soc_lim
-    #   low-power    12.0      12.0      28.0       58                70
-    #   balanced     25.0      25.0      28.0       58               100
-    #   performance  30.0      30.0      28.0       58               100
+    #   profile      ppt_fast  ppt_slow  stt_lim  tctl/gfx/soc_lim
+    #   performance      30.0     23-24       46               100
+    #   balanced         25.0        14       40               100
+    #   low-power        12.0        12       40                70
     #
-    # So the thermal ceilings are not a constant 100: a policy change drops
-    # all three to 70, which pins Tctl there and collapses clocks far harder
-    # than the power limit alone would. Worth a trace of its own rather than a
-    # dashed line that is easy to miss moving.
+    # Every one of these moves with the profile, so none of them is safe to
+    # treat as a constant and draw as scenery. The thermal ceilings dropping
+    # to 70 matter most: a part at 87-95 C handed a 70 C ceiling clamps to
+    # hold 70, which collapses clocks far harder than the power cut it
+    # arrives with.
     #
-    # For under two seconds either side of a profile switch the table also
-    # reports transient values -- stt_lim dipping to 40-46, ppt_slow to 12-23
-    # -- which settle on their own. A one-sample dip at a switch boundary is
-    # that transient, not a state the part actually ran in.
+    # stapm_lim is absent above because it is not a per-profile constant --
+    # it tracks a slow integrator and drifts (30.0 -> 13.8 over ten idle
+    # seconds in performance), settling well below the nameplate.
+    #
+    # Measure this with nothing re-applying limits in the background. An
+    # earlier version of this table read ppt_slow 28 and stt_lim 58 flat
+    # across all three profiles, which was a `watch ryzenadj --slow-limit
+    # 28000 --apu-skin-temp=58` loop winning every two seconds, not the
+    # firmware. The brief pre-override values were the real ones.
     PaneSpec("Thermal ceiling", "°C", [
         ("tctl_lim", "Tctl limit", None),
         ("stt_lim", "STT limit", None),
