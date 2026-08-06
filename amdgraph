@@ -136,6 +136,14 @@ N_CORES = 8
 
 CARD = "/sys/class/drm/card1/device"
 CPU_BASE = "/sys/devices/system/cpu"
+TPACPI = "/sys/devices/platform/thinkpad_acpi"
+PLATFORM_PROFILE = "/sys/firmware/acpi/platform_profile"
+
+# Plotted as a step trace so a profile switch lines up against the power drop
+# it caused. Ordered by how much power each profile allows.
+PROFILES = {"low-power": 0.0, "quiet": 0.0, "cool": 0.0,
+            "balanced": 1.0, "balanced-performance": 1.5,
+            "performance": 2.0}
 DATA_DIR = os.path.join(
     os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")),
     "amdgraph")
@@ -231,6 +239,14 @@ class Sampler:
     # purpose.
     SLOW_EVERY = 5
 
+    def _slow(self, key, path, scale=1.0):
+        """Read `path` every SLOW_EVERY ticks, holding the value in between.
+        Always reads the first time it is asked for, so a decimated sensor is
+        never blank for the opening samples of a recording."""
+        if key not in self.slow or self.tick % self.SLOW_EVERY == 0:
+            self.slow[key] = read_num(path, scale)
+        return self.slow[key]
+
     def __init__(self):
         self.hwmon = find_hwmon()
         self.cpubusy = CPUBusy()
@@ -283,6 +299,18 @@ class Sampler:
         if "core_power_mean" in s:
             s["core_power_sum"] = s["core_power_mean"] * N_CORES
 
+        # Unused budget: limit minus value. This is the signal that separates
+        # "throttled because it ran out of power" from "held down by something
+        # else entirely". Near zero means the power governor is the binding
+        # constraint. A large positive number while clocks are on the floor
+        # means the budget is going unspent -- an external clamp (EC PROCHOT,
+        # adapter current limit) rather than the SMU's own governor.
+        for name, val, lim in (("stapm_head", "stapm", "stapm_lim"),
+                               ("ppt_slow_head", "ppt_slow", "ppt_slow_lim"),
+                               ("ppt_fast_head", "ppt_fast", "ppt_fast_lim")):
+            if val in s and lim in s:
+                s[name] = s[lim] - s[val]
+
     def sample(self):
         s = {}
         self.tick += 1
@@ -312,11 +340,19 @@ class Sampler:
             s["fan2"] = read_num(f"{tp}/fan2_input")
             s["fan_cmd"], s["fan_mode"] = self._fan_command(tp)
         if (nv := self.hwmon.get("nvme")):
-            if self.tick % self.SLOW_EVERY == 0:
-                self.slow["nvme"] = read_num(f"{nv}/temp1_input", 1000)
-            s["nvme"] = self.slow.get("nvme")
+            s["nvme"] = self._slow("nvme", f"{nv}/temp1_input", 1000)
         if (bat := self.hwmon.get("BAT0")):
             s["batt_power"] = read_num(f"{bat}/power1_input", 1_000_000)
+
+        # Platform policy. Any of these can move the power budget out from
+        # under you without the SMU rows showing a cause, so they belong on
+        # the same timeline as the drop they explain.
+        s["pprof"] = PROFILES.get(read_text(PLATFORM_PROFILE) or "")
+        s["lapmode"] = read_num(f"{TPACPI}/dytc_lapmode")
+        st = read_text("/sys/class/power_supply/BAT0/status")
+        s["batt_charging"] = None if st is None else float(st == "Charging")
+        # ~0.5 ms, an order of magnitude dearer than its neighbours.
+        s["ac_online"] = self._slow("ac", "/sys/class/power_supply/AC/online")
         return s
 
     @staticmethod
@@ -604,6 +640,20 @@ PANES = [
         ("ppt_fast", "PPT fast", "ppt_fast_lim"),
         ("ppt_slow", "PPT slow", "ppt_slow_lim"),
     ], note="sustained budget; dashed = limit"),
+    # The two panes that answer "why did it drop?". If the ceiling moved, it
+    # was a policy change (DYTC, PMF, platform profile, adapter budget). If the
+    # ceiling held but headroom opened up, the power governor was not the thing
+    # holding it down -- look for an external clamp instead.
+    PaneSpec("Power ceiling", "W", [
+        ("ppt_fast_lim", "PPT fast limit", None),
+        ("stapm_lim", "STAPM limit", None),
+        ("ppt_slow_lim", "PPT slow limit", None),
+    ], height=96, note="a step here = firmware changed the budget"),
+    PaneSpec("Unused budget", "W", [
+        ("ppt_slow_head", "PPT slow spare", None),
+        ("stapm_head", "STAPM spare", None),
+    ], height=96,
+        note="≈0 = power-limited; large while clocks are low = clamped"),
     PaneSpec("Rail power", "W", [
         ("core_power_sum", "cores", None),
         ("gpu_power", "amdgpu", None),
@@ -674,6 +724,15 @@ PANES = [
     PaneSpec("Reliability", "FIT", [
         ("fit", "FIT", "fit_lim"),
     ], height=76),
+    # Step traces. Unitless on purpose -- these are states, not quantities, and
+    # the only thing being read off them is when they change.
+    PaneSpec("Platform state", "", [
+        ("pprof", "profile", None),
+        ("ac_online", "AC", None),
+        ("batt_charging", "charging", None),
+        ("lapmode", "lap mode", None),
+    ], height=90,
+        note="profile 0=low-power 1=balanced 2=performance; a step = budget change"),
 ]
 
 HEAT_MODES = [
@@ -1887,9 +1946,11 @@ class Main(QMainWindow):
         for base in PM_CORE:
             keys += [f"{base}_{i}" for i in range(N_CORES)]
             keys += [f"{base}_mean", f"{base}_max"]
-        keys += ["core_power_sum", "cpu_busy", "gpu_busy", "sclk", "sclk_hw",
+        keys += ["stapm_head", "ppt_slow_head", "ppt_fast_head",
+                 "core_power_sum", "cpu_busy", "gpu_busy", "sclk", "sclk_hw",
                  "socclk", "gpu_edge", "gpu_power", "ec_skin", "ec_cpu",
-                 "fan1", "fan2", "fan_cmd", "nvme", "batt_power"]
+                 "fan1", "fan2", "fan_cmd", "nvme", "batt_power",
+                 "pprof", "ac_online", "batt_charging", "lapmode"]
         seen, out = set(), []
         for k in keys:
             if k not in seen:
