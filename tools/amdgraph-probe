@@ -1,0 +1,366 @@
+#!/usr/bin/env python3
+"""Dump everything needed to write an amdgraph profile for an unfamiliar part.
+
+Run this on a machine amdgraph does not yet support and send the JSON back. It
+captures the identity of every data source (pm_table version and size,
+gpu_metrics header, core topology, hwmon inventory, platform driver) plus raw
+periodic dumps of the two binary blobs, so a field map can be *derived* from
+recorded data rather than transcribed from someone else's table and hoped for.
+
+That distinction is the whole point. amdgraph's Phoenix map is trustworthy
+because each index was checked against something independent -- DRAM bandwidth
+correlated +0.997 against known traffic, per-core C0+C1+C6 summing to 100%,
+mclk against the memory's rated speed. A map copied without that check looks
+identical in the source and is worth much less. Raw dumps under a few named
+conditions are what make the check possible later, off the machine.
+
+Deliberately stdlib-only: no numpy, no Qt, no amdgraph import. It has to run on
+a Steam Deck recovery shell or a fresh install with nothing on it.
+
+Read-only. Touches no MSRs, writes no limits, loads no modules.
+
+    tools/amdgraph-probe --label idle
+    tools/amdgraph-probe --label load-8t -n 120       (while something runs)
+
+Take one capture idle and one under a load you can describe; fields that move
+together only separate when something is actually moving.
+"""
+
+import argparse
+import base64
+import glob
+import json
+import os
+import platform
+import socket
+import struct
+import sys
+import time
+from datetime import datetime, timezone
+
+PM_TABLE = "/sys/kernel/ryzen_smu_drv/pm_table"
+PM_VERSION = "/sys/kernel/ryzen_smu_drv/pm_table_version"
+SMU_DRV = "/sys/kernel/ryzen_smu_drv"
+
+
+def read_text(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError as e:
+        return f"<{e.strerror}>" if e.errno else None
+
+
+def read_bytes(path):
+    try:
+        with open(path, "rb") as f:
+            return f.read()
+    except OSError:
+        return None
+
+
+def cpu_identity():
+    """Family/model/stepping as well as the marketing name: the codename that
+    picks a pm_table layout is a function of the former, and the latter is
+    ambiguous (a '7840U' and a '8840U' are the same silicon)."""
+    out = {"uname": platform.uname()._asdict(), "flags_zen": []}
+    txt = read_text("/proc/cpuinfo") or ""
+    first = txt.split("\n\n")[0]
+    for line in first.splitlines():
+        k, _, v = line.partition(":")
+        k, v = k.strip(), v.strip()
+        if k in ("model name", "cpu family", "model", "stepping",
+                 "microcode", "vendor_id", "cpu cores", "siblings"):
+            out[k.replace(" ", "_")] = v
+    out["logical_cpus"] = os.cpu_count()
+    return out
+
+
+def topology():
+    """Physical cores and, crucially, the L3 sharing groups.
+
+    L3 sharing is how CCX boundaries become visible from userspace, and they
+    matter: the per-core panes assume one flat set of 8, which is wrong for a
+    two-CCD Granite Ridge and for Strix Halo. Nothing else in sysfs draws that
+    line as reliably as index3's shared_cpu_list.
+    """
+    cores, l3, pkgs, dies = {}, {}, set(), set()
+    for d in sorted(glob.glob("/sys/devices/system/cpu/cpu[0-9]*")):
+        cpu = os.path.basename(d)
+        core = read_text(f"{d}/topology/core_id")
+        pkg = read_text(f"{d}/topology/physical_package_id")
+        die = read_text(f"{d}/topology/die_id")
+        share = read_text(f"{d}/cache/index3/shared_cpu_list")
+        if core is not None:
+            cores.setdefault((pkg, die, core), []).append(cpu)
+        if pkg is not None:
+            pkgs.add(pkg)
+        if die is not None:
+            dies.add(die)
+        if share:
+            l3.setdefault(share, []).append(cpu)
+    return {
+        "physical_cores": len(cores),
+        "packages": sorted(pkgs),
+        "dies": sorted(dies),
+        "l3_groups": [{"shared_cpu_list": k, "cpus": v}
+                      for k, v in sorted(l3.items())],
+        "ccx_count": len(l3) or None,
+    }
+
+
+def amdgpu_cards():
+    """Every DRM card, with enough to pick the right one.
+
+    amdgraph hardcodes card1 today, which is true on exactly one machine.
+    Vendor 0x1002 plus the presence of gpu_metrics is the durable test.
+    """
+    out = []
+    for dev in sorted(glob.glob("/sys/class/drm/card[0-9]*/device")):
+        vendor = read_text(f"{dev}/vendor")
+        if vendor != "0x1002":
+            continue
+        gm = read_bytes(f"{dev}/gpu_metrics")
+        entry = {
+            "path": dev,
+            "vendor": vendor,
+            "device": read_text(f"{dev}/device"),
+            "revision": read_text(f"{dev}/revision"),
+            "gpu_metrics": None,
+            "pp_dpm": {},
+            "attrs": sorted(f for f in os.listdir(dev)
+                            if f.startswith(("pp_", "gpu_", "power_", "mem_"))),
+        }
+        if gm and len(gm) >= 4:
+            size, fmt_rev, cont_rev = struct.unpack_from("<HBB", gm, 0)
+            entry["gpu_metrics"] = {
+                "declared_size": size,
+                "actual_size": len(gm),
+                "format_revision": fmt_rev,
+                "content_revision": cont_rev,
+                # v2_1 has no indep_throttle_status and no residency counters;
+                # v2_2+ gains the ASIC-independent bitmask; v3_0 replaces the
+                # bitmask with per-reason residency counters. Which one this is
+                # decides how cap reasons must be sampled.
+                "note": f"gpu_metrics_v{fmt_rev}_{cont_rev}",
+            }
+        for f in sorted(glob.glob(f"{dev}/pp_dpm_*")):
+            entry["pp_dpm"][os.path.basename(f)] = read_text(f)
+        out.append(entry)
+    return out
+
+
+def hwmon_inventory():
+    """Driver name -> readable attributes. Discovery is by name because hwmon
+    indices move across boots; the attribute list is what tells you whether a
+    platform exposes fans, a skin sensor, or nothing at all."""
+    out = {}
+    for h in sorted(glob.glob("/sys/class/hwmon/hwmon[0-9]*")):
+        name = read_text(f"{h}/name")
+        if not name:
+            continue
+        attrs = {}
+        for f in sorted(os.listdir(h)):
+            if f.split("_")[0][:-1] in ("temp", "fan", "power", "in", "curr",
+                                        "freq", "pwm", "energy"):
+                attrs[f] = read_text(os.path.join(h, f))
+        out.setdefault(name, []).append({"path": h, "attrs": attrs})
+    return out
+
+
+def platform_layer():
+    """The vendor seam: EC drivers, profile interfaces, thermal zones.
+
+    This is the axis that differs between two machines carrying the same
+    silicon -- a Phoenix ThinkPad and a Phoenix Framework share every SMU field
+    and no EC field at all.
+    """
+    known = ["thinkpad_acpi", "asus_wmi", "asus_nb_wmi", "dell_smbios",
+             "hp_wmi", "framework_laptop", "cros_ec", "cros_ec_lpc",
+             "steamdeck", "oxpec", "amd_pmf", "ideapad_laptop",
+             "nct6775", "it87", "k10temp", "zenpower", "asus_ec_sensors"]
+    return {
+        "loaded_modules": sorted(
+            m for m in known if os.path.isdir(f"/sys/module/{m}")),
+        "platform_devices": sorted(
+            os.path.basename(p) for p in glob.glob("/sys/devices/platform/*")
+            if os.path.isdir(p))[:80],
+        "platform_profile": read_text("/sys/firmware/acpi/platform_profile"),
+        "platform_profile_choices": read_text(
+            "/sys/firmware/acpi/platform_profile_choices"),
+        "dmi": {k: read_text(f"/sys/class/dmi/id/{k}") for k in
+                ("sys_vendor", "product_name", "product_family",
+                 "product_version", "board_name", "bios_version",
+                 "bios_release", "ec_firmware_release")},
+        "thermal_zones": {
+            os.path.basename(z): read_text(f"{z}/type")
+            for z in sorted(glob.glob("/sys/class/thermal/thermal_zone*"))},
+        "acpi_tables": sorted(
+            os.path.basename(t)
+            for t in glob.glob("/sys/firmware/acpi/tables/*")
+            if os.path.isfile(t)),
+    }
+
+
+def counter_sources():
+    """Everything that is a monotonic counter rather than a sysfs poll.
+
+    Data-fabric traffic, RAPL energy and (on gpu_metrics v3_0) the throttle
+    residencies all live here. They need a different sampling shape from the
+    rest of amdgraph -- held open, differenced per tick -- so it is worth
+    knowing up front which of them a given machine actually offers, and at what
+    privilege.
+    """
+    pmus = {}
+    for p in sorted(glob.glob("/sys/bus/event_source/devices/*")):
+        name = os.path.basename(p)
+        ev = os.path.join(p, "events")
+        pmus[name] = {
+            "type": read_text(os.path.join(p, "type")),
+            "cpumask": read_text(os.path.join(p, "cpumask")),
+            "n_events": len(os.listdir(ev)) if os.path.isdir(ev) else 0,
+        }
+    rapl = {}
+    for d in sorted(glob.glob("/sys/class/powercap/*")):
+        nm = read_text(f"{d}/name")
+        if nm:
+            # Readability is the interesting part: energy_uj is root-only on
+            # most distributions since the platypus side-channel disclosure.
+            rapl[os.path.basename(d)] = {
+                "name": nm,
+                "energy_readable": os.access(f"{d}/energy_uj", os.R_OK),
+            }
+    return {
+        "perf_pmus": pmus,
+        "perf_event_paranoid": read_text("/proc/sys/kernel/perf_event_paranoid"),
+        "powercap": rapl,
+        "euid": os.geteuid(),
+    }
+
+
+def smu_info():
+    ver = read_bytes(PM_VERSION)
+    tbl = read_bytes(PM_TABLE)
+    info = {
+        "driver_present": os.path.isdir(SMU_DRV),
+        "attrs": sorted(os.listdir(SMU_DRV)) if os.path.isdir(SMU_DRV) else [],
+        "pm_table_version": None,
+        "pm_table_bytes": None,
+        "pm_table_floats": None,
+        "codename": read_text(f"{SMU_DRV}/codename"),
+        "version": read_text(f"{SMU_DRV}/version"),
+    }
+    if ver and len(ver) >= 4:
+        info["pm_table_version"] = f"{struct.unpack('<I', ver[:4])[0]:#010x}"
+    if tbl:
+        info["pm_table_bytes"] = len(tbl)
+        info["pm_table_floats"] = len(tbl) // 4
+    return info
+
+
+def capture(n, interval, card):
+    """Raw blobs over time, base64'd.
+
+    Raw rather than decoded on purpose: the entire point is that we do not yet
+    know what the fields mean on this part. A dump preserves that question for
+    later; a decode answers it prematurely.
+    """
+    gm_path = f"{card}/gpu_metrics" if card else None
+    samples = []
+    t0 = time.monotonic()
+    for _ in range(n):
+        s = {"t": round(time.monotonic() - t0, 4)}
+        pm = read_bytes(PM_TABLE)
+        if pm:
+            s["pm_table"] = base64.b64encode(pm).decode()
+        if gm_path:
+            gm = read_bytes(gm_path)
+            if gm:
+                s["gpu_metrics"] = base64.b64encode(gm).decode()
+        # A few decoded references from independent paths, so the raw floats
+        # have something to be correlated against later.
+        s["ref"] = {
+            "loadavg": (read_text("/proc/loadavg") or "").split(" ")[0],
+            "cpu_mhz": [read_text(f"/sys/devices/system/cpu/cpu{i}/cpufreq/"
+                                  "scaling_cur_freq")
+                        for i in range(min(16, os.cpu_count() or 1))],
+        }
+        samples.append(s)
+        time.sleep(interval)
+    return samples
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Dump an unfamiliar AMD part's sensor sources for "
+                    "amdgraph.",
+        formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
+    ap.add_argument("--label", default="unlabelled",
+                    help="what the machine was doing (idle, load-8t, gpu, "
+                         "…) -- fields only separate when something moves")
+    ap.add_argument("-n", "--samples", type=int, default=60)
+    ap.add_argument("-i", "--interval", type=float, default=0.5)
+    ap.add_argument("-o", "--out", default=None,
+                    help="output file (default: amdgraph-probe-HOST-LABEL.json)")
+    args = ap.parse_args()
+
+    cards = amdgpu_cards()
+    card = None
+    for c in cards:
+        if c["gpu_metrics"]:
+            card = c["path"]
+            break
+    if card is None and cards:
+        card = cards[0]["path"]
+
+    doc = {
+        "schema": "amdgraph-probe/1",
+        "captured": datetime.now(timezone.utc).isoformat(),
+        "label": args.label,
+        "host": socket.gethostname(),
+        "python": sys.version.split()[0],
+        "cpu": cpu_identity(),
+        "topology": topology(),
+        "smu": smu_info(),
+        "drm_cards": cards,
+        "selected_card": card,
+        "hwmon": hwmon_inventory(),
+        "platform": platform_layer(),
+        "counters": counter_sources(),
+        "sampling": {"n": args.samples, "interval": args.interval},
+    }
+
+    if not doc["smu"]["driver_present"]:
+        print("note: ryzen_smu is not loaded -- no pm_table in this capture",
+              file=sys.stderr)
+    if card is None:
+        print("note: no amdgpu card found -- no gpu_metrics in this capture",
+              file=sys.stderr)
+
+    print(f"capturing {args.samples} samples at {args.interval}s "
+          f"({args.samples * args.interval:.0f}s)…", file=sys.stderr)
+    doc["samples"] = capture(args.samples, args.interval, card)
+
+    out = args.out or (f"amdgraph-probe-{doc['host']}-{args.label}.json")
+    with open(out, "w") as f:
+        json.dump(doc, f, indent=1)
+    print(f"wrote {out} ({os.path.getsize(out) / 1024:.0f} KiB)",
+          file=sys.stderr)
+
+    # A short human summary, so an obvious problem is visible without a JSON
+    # reader on the far end.
+    gm = next((c["gpu_metrics"] for c in cards if c["gpu_metrics"]), None)
+    print(f"  cpu          {doc['cpu'].get('model_name', '?')}", file=sys.stderr)
+    print(f"  cores        {doc['topology']['physical_cores']} physical, "
+          f"{doc['topology']['ccx_count']} L3 group(s)", file=sys.stderr)
+    print(f"  pm_table     {doc['smu']['pm_table_version']} "
+          f"({doc['smu']['pm_table_floats']} floats)", file=sys.stderr)
+    print(f"  gpu_metrics  {gm['note'] if gm else 'none'} "
+          f"({gm['actual_size'] if gm else 0} B) on {card}", file=sys.stderr)
+    print(f"  platform     {'/'.join(doc['platform']['loaded_modules']) or '-'}",
+          file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
