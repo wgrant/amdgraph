@@ -721,6 +721,29 @@ PANES = [
         ("stapm_lim", "STAPM limit", None),
         ("ppt_slow_lim", "PPT slow limit", None),
     ], height=96, note="a step here = firmware changed the budget"),
+    # Settled limits measured across the three platform profiles here:
+    #
+    #   profile     stapm  ppt_fast  ppt_slow  stt_lim  tctl/gfx/soc_lim
+    #   low-power    12.0      12.0      28.0       58                70
+    #   balanced     25.0      25.0      28.0       58               100
+    #   performance  30.0      30.0      28.0       58               100
+    #
+    # So the thermal ceilings are not a constant 100: a policy change drops
+    # all three to 70, which pins Tctl there and collapses clocks far harder
+    # than the power limit alone would. Worth a trace of its own rather than a
+    # dashed line that is easy to miss moving.
+    #
+    # For under two seconds either side of a profile switch the table also
+    # reports transient values -- stt_lim dipping to 40-46, ppt_slow to 12-23
+    # -- which settle on their own. A one-sample dip at a switch boundary is
+    # that transient, not a state the part actually ran in.
+    PaneSpec("Thermal ceiling", "°C", [
+        ("tctl_lim", "Tctl limit", None),
+        ("stt_lim", "STT limit", None),
+        ("thm_gfx_lim", "GFX limit", None),
+        ("thm_soc_lim", "SoC limit", None),
+    ], floor0=False, height=96,
+        note="a step down here throttles far harder than a power cut"),
     PaneSpec("Unused budget", "W", [
         ("ppt_slow_head", "PPT slow spare", None),
         ("stapm_head", "STAPM spare", None),
