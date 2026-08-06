@@ -36,6 +36,7 @@ import os
 import socket
 import struct
 import sys
+import threading
 import time
 from datetime import datetime
 
@@ -257,6 +258,90 @@ class CPUBusy:
         return 100.0 * (dt - di) / dt if dt else None
 
 
+class ThrottleSampler:
+    """Polls the throttler bitmask off-thread and reports, per reason, the
+    fraction of the interval it was asserted.
+
+    The bits are instantaneous flags on a controller that duty-cycles fast.
+    Measured on this part: the SMU refreshes gpu_metrics at ~149 Hz, and SPL
+    toggles ~19 times a second with a duty cycle of 12.7% at idle and runs
+    rarely longer than 270 ms. Sampling that once a second reads one 6.6 ms
+    window out of every 1000 and reports a coin flip -- a limiter that is
+    continuously regulating shows up as a scatter of unrelated-looking marks.
+
+    So the reading is decoupled from the display: a background thread
+    accumulates, and each UI tick drains a duty cycle. Costs about 0.6 ms per
+    fresh read (the driver caches for 5 ms), hence roughly 1.2% of a core at
+    20 Hz -- worth it for the one pane whose entire job is naming the cause,
+    but tunable, and set to 1 Hz it degrades to the old instantaneous sample.
+    """
+
+    def __init__(self, hz=20.0):
+        self.hz = hz
+        self._lock = threading.Lock()
+        self._counts = {b: 0.0 for b, _n, _f in THROTTLE_BITS}
+        self._total = 0
+        self._raw = 0
+        self._stop = threading.Event()
+        self._thread = None
+
+    def start(self):
+        if self._thread or self.hz <= 1.0:
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(timeout=1.0)
+            self._thread = None
+
+    def set_rate(self, hz):
+        self.stop()
+        self.hz = hz
+        with self._lock:
+            self._counts = {b: 0.0 for b in self._counts}
+            self._total = 0
+        self.start()
+
+    def _run(self):
+        period = 1.0 / self.hz
+        nxt = time.monotonic()
+        while not self._stop.is_set():
+            try:
+                with open(GPU_METRICS, "rb") as f:
+                    raw = f.read()
+                ts = struct.unpack_from("<I", raw, GM_THROTTLE_OFF)[0]
+            except (OSError, struct.error):
+                ts = None
+            if ts is not None:
+                with self._lock:
+                    self._total += 1
+                    self._raw |= ts
+                    for b in self._counts:
+                        if (ts >> b) & 1:
+                            self._counts[b] += 1.0
+            nxt += period
+            delay = nxt - time.monotonic()
+            if delay < 0:                 # fell behind; resync rather than spin
+                nxt = time.monotonic()
+                delay = 0.0
+            self._stop.wait(delay)
+
+    def drain(self):
+        """(duty per bit, OR of raw values, sample count) since the last call."""
+        with self._lock:
+            n = self._total
+            duty = ({b: c / n for b, c in self._counts.items()} if n else None)
+            raw = self._raw
+            self._counts = {b: 0.0 for b in self._counts}
+            self._total = 0
+            self._raw = 0
+        return duty, raw, n
+
+
 class Sampler:
     """One sample = one dict of key -> float (or None where unavailable).
 
@@ -290,6 +375,9 @@ class Sampler:
         self.pm_ok = False
         self.pm_note = ""
         self.gm_ok, self.gm_note = self._check_gpu_metrics()
+        self.throttle = ThrottleSampler()
+        if self.gm_ok:
+            self.throttle.start()
         try:
             with open(PM_VERSION, "rb") as f:
                 ver = struct.unpack("<I", f.read(4))[0]
@@ -367,18 +455,32 @@ class Sampler:
                 s[name] = s[lim] - s[val]
 
     def _throttle(self, s):
-        """Decode the SMU throttler bitmask, if this kernel's layout matches."""
+        """Per-reason duty cycle over the interval, from the background poller.
+
+        Values are fractions, not flags: 0.62 means the reason was asserted in
+        62% of the samples taken since the last tick. Falling back to a single
+        instantaneous read only happens when high-rate polling is switched off,
+        and then the value is 0 or 1 as before.
+        """
         if not self.gm_ok:
+            return
+        duty, raw, n = self.throttle.drain()
+        if duty is not None:
+            s["throttle_raw"] = float(raw)
+            s["throttle_n"] = float(n)
+            for bit, _name, _fam in THROTTLE_BITS:
+                s[f"thr{bit}"] = duty.get(bit, 0.0)
             return
         try:
             with open(GPU_METRICS, "rb") as f:
-                raw = f.read()
+                buf = f.read()
         except OSError:
             return
-        if len(raw) < GM_THROTTLE_OFF + 4:
+        if len(buf) < GM_THROTTLE_OFF + 4:
             return
-        ts = struct.unpack_from("<I", raw, GM_THROTTLE_OFF)[0]
+        ts = struct.unpack_from("<I", buf, GM_THROTTLE_OFF)[0]
         s["throttle_raw"] = float(ts)
+        s["throttle_n"] = 1.0
         for bit, _name, _fam in THROTTLE_BITS:
             s[f"thr{bit}"] = float((ts >> bit) & 1)
 
@@ -837,6 +939,12 @@ PANES = [
         note="profile 0=low-power 1=balanced 2=performance; a step = budget change"),
 ]
 
+# Throttler poll rates. 1 Hz means "no background thread" and gives the old
+# instantaneous flag; the default is chosen to resolve a ~20 Hz duty cycle
+# without the cost running away.
+CAP_RATES = [(1.0, "1 Hz"), (10.0, "10 Hz"), (20.0, "20 Hz"), (50.0, "50 Hz")]
+CAP_DEFAULT = 2
+
 HEAT_MODES = [
     ("core_freq", "clock", "MHz", 400.0, 5200.0),
     ("core_c0", "C0 residency", "%", 0.0, 100.0),
@@ -977,6 +1085,33 @@ def fmt_time(t):
     h, rem = divmod(t, 3600)
     m, s = divmod(rem, 60)
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+
+def column_hold(cols, vals, width):
+    """Map samples onto pixel columns, each held until the next sample.
+
+    Returns (values, valid_mask). Without the hold, a raster window wider than
+    the sample count paints isolated one-pixel marks separated by background,
+    which reads as an intermittent signal when it is really a continuous one
+    sampled sparsely -- the same illusion, at the display layer, that the
+    duty-cycle sampling fixes at the source. Nothing is painted past the last
+    sample, so the future stays blank rather than being extrapolated.
+
+    `cols` must be non-decreasing, which it is: it derives from sorted time.
+    """
+    out = np.zeros(width, dtype=np.float64)
+    valid = np.zeros(width, dtype=bool)
+    if cols.size == 0:
+        return out, valid
+    per = np.zeros(width, dtype=np.float64)
+    np.maximum.at(per, cols, vals)          # worst wins a shared column
+    seen = np.zeros(width, dtype=bool)
+    seen[cols] = True
+    ar = np.arange(width)
+    src = np.maximum.accumulate(np.where(seen, ar, -1))
+    valid = (src >= 0) & (ar <= cols[-1])
+    out[valid] = per[src[valid]]
+    return out, valid
 
 
 def _runs(polys, xs, ys):
@@ -1546,7 +1681,8 @@ class ThrottlePane(QWidget):
             v = (store.at(f"thr{bit}", t) if t is not None
                  else store.latest(f"thr{bit}"))
             if v:
-                active.append((name, fam))
+                active.append((name, fam, v))
+        active.sort(key=lambda a: -a[2])
         x = 6 + fm.horizontalAdvance("Cap reason") + 16
         if not active:
             p.setPen(MUTED)
@@ -1555,8 +1691,11 @@ class ThrottlePane(QWidget):
                        | Qt.AlignmentFlag.AlignVCenter,
                        "none — nothing is holding it back")
         else:
-            for name, fam in active:
-                txt = f"◀ {name}"
+            for name, fam, v in active:
+                # The percentage is the point: a reason asserted 8% of the
+                # interval is a different situation from one asserted 95%,
+                # and both used to render identically.
+                txt = f"◀ {name} {v * 100:.0f}%"
                 w = fm.horizontalAdvance(txt) + 12
                 if x + w > self.width() - 6:
                     break
@@ -1593,16 +1732,28 @@ class ThrottlePane(QWidget):
                 span = max(1e-9, self.view.t1 - self.view.t0)
                 cols = np.clip((((ts[i0:i1] - self.view.t0) / span)
                                 * (w - 1)).astype(np.int64), 0, w - 1)
+                bg = np.array([PANE_BG.blue(), PANE_BG.green(),
+                               PANE_BG.red()], dtype=np.float64)
                 for i, (bit, _name, fam) in enumerate(THROTTLE_BITS):
                     a = store.col(f"thr{bit}")
                     if a is None:
                         continue
-                    seg = a[i0:i1]
-                    on = np.nan_to_num(seg, nan=0.0) > 0.5
-                    if not on.any():
+                    duty = np.nan_to_num(a[i0:i1].astype(np.float64), nan=0.0)
+                    if not (duty > 0).any():
                         continue
+                    acc, valid = column_hold(cols, duty, w)
+                    lit = valid & (acc > 0)
+                    if not lit.any():
+                        continue
+                    # sqrt, not linear: a 10% duty is meaningful and would be
+                    # near-invisible against the surface at linear intensity.
+                    # Exact figures live in the header, so this only has to be
+                    # monotonic and legible.
+                    inten = np.sqrt(np.clip(acc[lit], 0.0, 1.0))[:, None]
                     c = self.FAMILY[fam]
-                    img[i, cols[on]] = (c.blue(), c.green(), c.red(), 255)
+                    fg = np.array([c.blue(), c.green(), c.red()],
+                                  dtype=np.float64)
+                    img[i, lit, :3] = (bg + (fg - bg) * inten).astype(np.uint8)
         self._buf = np.ascontiguousarray(img)
         qimg = QImage(self._buf.data, w, n, w * 4,
                       QImage.Format.Format_ARGB32)
@@ -1789,8 +1940,11 @@ class CorePane(QWidget):
                     if not ok.any():
                         continue
                     norm = np.clip((seg - lo) / max(1e-9, hi - lo), 0, 1)
-                    shade = (norm * 255).astype(np.uint8)
-                    img[c, cols[ok]] = LUT[shade[ok]]
+                    held, valid = column_hold(cols[ok], norm[ok], w)
+                    if not valid.any():
+                        continue
+                    shade = (held * 255).astype(np.uint8)
+                    img[c, valid] = LUT[shade[valid]]
                 self._blit(p, r, img, w)
                 return lo, hi
         self._blit(p, r, img, w)
@@ -2051,6 +2205,19 @@ class Main(QMainWindow):
         h.addWidget(self.btn_live)
 
         h.addSpacing(10)
+        h.addWidget(QLabel("Cap poll"))
+        self.cb_cap = QComboBox()
+        for hz, lbl in CAP_RATES:
+            self.cb_cap.addItem(lbl)
+        self.cb_cap.setCurrentIndex(CAP_DEFAULT)
+        self.cb_cap.setToolTip(
+            "How often the throttler bitmask is sampled. The bits toggle at "
+            "roughly 20 Hz, so 1 Hz reports a coin flip rather than a duty "
+            "cycle. Higher costs more CPU: ~1.2% of a core at 20 Hz.")
+        self.cb_cap.currentIndexChanged.connect(self.on_cap_rate)
+        h.addWidget(self.cb_cap)
+
+        h.addSpacing(10)
         h.addWidget(QLabel("Cores"))
         self.cb_heat = QComboBox()
         for _, name, unit, _, _ in HEAT_MODES:
@@ -2247,7 +2414,7 @@ class Main(QMainWindow):
         for base in PM_CORE:
             keys += [f"{base}_{i}" for i in range(N_CORES)]
             keys += [f"{base}_mean", f"{base}_max"]
-        keys += ["throttle_raw"]
+        keys += ["throttle_raw", "throttle_n"]
         keys += [f"thr{b}" for b, _n, _f in THROTTLE_BITS]
         keys += ["stapm_head", "ppt_slow_head", "ppt_fast_head",
                  "core_power_sum", "cpu_busy", "gpu_busy", "sclk", "sclk_hw",
@@ -2279,6 +2446,10 @@ class Main(QMainWindow):
         self.view.overlay = st
         self.view.overlay_name = os.path.basename(path)
         self.btn_clear.setEnabled(True)
+        self.refresh()
+
+    def on_cap_rate(self, i):
+        self.sampler.throttle.set_rate(CAP_RATES[i][0])
         self.refresh()
 
     def on_clear_overlay(self):
@@ -2324,6 +2495,7 @@ class Main(QMainWindow):
     def closeEvent(self, ev):
         if self.recorder:
             self.recorder.close()
+        self.sampler.throttle.stop()
         super().closeEvent(ev)
 
 
