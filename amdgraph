@@ -106,14 +106,18 @@ PM_SCALAR = {
     "fit_lim":          (26,    1.0),
     "vid":              (29,    1.0),
     "vid_lim":          (28,    1.0),
-    # NOT the achieved GPU clock. Index 57 reads exactly 2700 MHz, which is
-    # the top pp_dpm_sclk level, so 56/57 are a (value, limit) pair -- but with
-    # amdgpu's own freq1_input and the DPM level both reporting 800 MHz, index
-    # 56 sitting at ~2.67 GHz can only be the clock the SMU is *permitting*,
-    # not the one the GPU is running. Charted as headroom and labelled as such;
-    # the achieved clock comes from amdgpu (see sclk_hw).
-    "gfx_permit":       (56,    1000.0),   # GHz -> MHz
-    "gfx_permit_max":   (57,    1000.0),
+    # The instantaneous GFX clock; index 57 is its ceiling and reads a
+    # constant 2700, matching the top pp_dpm_sclk level.
+    #
+    # This was briefly mislabelled here as a "permitted" clock, on the strength
+    # of one reading of 2.67 GHz taken while amdgpu's freq1_input and
+    # pp_dpm_sclk both said 800. Watching it properly, index 56 tracks GPU
+    # activity and falls to exactly 800 when the GPU goes quiet -- it is the
+    # real clock, sampled instantaneously, and the disagreement is because
+    # freq1_input and pp_dpm_sclk report the coarse DPM *level*. Neither is
+    # more authoritative; they answer different questions, so both are plotted.
+    "gfx_clk":          (56,    1000.0),   # GHz -> MHz
+    "gfx_clk_max":      (57,    1000.0),
     "fclk":             (89,    1.0),
     "uclk":             (93,    1.0),
     "mclk":             (97,    1.0),
@@ -808,68 +812,62 @@ class PaneSpec:
         self.note = note
 
 
+# Ordered as the diagnosis runs: what is capping it, then the three things that
+# can cap it (power, current, heat), then what that bought in clocks, then the
+# physical system, then platform policy.
+#
+# Every governed quantity is drawn once, as value plus its own ceiling over
+# time. There were briefly three views of this -- value with a dashed limit, the
+# ceilings alone, and limit-minus-value -- which existed only to *infer* the
+# cause before the SMU's throttler bits were being read. Cap reason states it
+# outright now, so the other two were removed rather than kept in sync.
+#
+# Firmware limits per platform profile on this machine, measured with no
+# ryzenadj override running:
+#
+#   profile      ppt_fast  ppt_slow  stt_lim  tctl/gfx/soc_lim
+#   performance      30.0     23-24       46               100
+#   balanced         25.0        14       40               100
+#   low-power        12.0        12       40                70
+#
+# Every one of these moves with the profile, so none is safe to treat as a
+# constant and draw as scenery -- which is why the dashed ceilings are plotted
+# as time series rather than at their current value. The thermal ceilings
+# dropping to 70 matter most: a part at 87-95 C handed a 70 C ceiling clamps to
+# hold 70, collapsing clocks far harder than the power cut it arrives with.
+#
+# stapm_lim is absent above because it is not a per-profile constant -- it
+# tracks a slow integrator and drifts (30.0 -> 13.8 over ten idle seconds in
+# performance), settling well below the nameplate.
+#
+# Measure this with nothing re-applying limits in the background. An earlier
+# version of this table read ppt_slow 28 and stt_lim 58 flat across all three
+# profiles, which was a `watch ryzenadj --slow-limit 28000 --apu-skin-temp=58`
+# loop winning every two seconds, not the firmware. The brief pre-override
+# values were the real ones.
 PANES = [
     PaneSpec("Package power", "W", [
         ("stapm", "STAPM", "stapm_lim"),
         ("ppt_fast", "PPT fast", "ppt_fast_lim"),
         ("ppt_slow", "PPT slow", "ppt_slow_lim"),
-    ], note="sustained budget; dashed = limit"),
-    # The two panes that answer "why did it drop?". If the ceiling moved, it
-    # was a policy change (DYTC, PMF, platform profile, adapter budget). If the
-    # ceiling held but headroom opened up, the power governor was not the thing
-    # holding it down -- look for an external clamp instead.
-    PaneSpec("Power ceiling", "W", [
-        ("ppt_fast_lim", "PPT fast limit", None),
-        ("stapm_lim", "STAPM limit", None),
-        ("ppt_slow_lim", "PPT slow limit", None),
-    ], height=96, note="a step here = firmware changed the budget"),
-    # Firmware limits per platform profile on this machine, measured with no
-    # ryzenadj override running:
-    #
-    #   profile      ppt_fast  ppt_slow  stt_lim  tctl/gfx/soc_lim
-    #   performance      30.0     23-24       46               100
-    #   balanced         25.0        14       40               100
-    #   low-power        12.0        12       40                70
-    #
-    # Every one of these moves with the profile, so none of them is safe to
-    # treat as a constant and draw as scenery. The thermal ceilings dropping
-    # to 70 matter most: a part at 87-95 C handed a 70 C ceiling clamps to
-    # hold 70, which collapses clocks far harder than the power cut it
-    # arrives with.
-    #
-    # stapm_lim is absent above because it is not a per-profile constant --
-    # it tracks a slow integrator and drifts (30.0 -> 13.8 over ten idle
-    # seconds in performance), settling well below the nameplate.
-    #
-    # Measure this with nothing re-applying limits in the background. An
-    # earlier version of this table read ppt_slow 28 and stt_lim 58 flat
-    # across all three profiles, which was a `watch ryzenadj --slow-limit
-    # 28000 --apu-skin-temp=58` loop winning every two seconds, not the
-    # firmware. The brief pre-override values were the real ones.
-    PaneSpec("Thermal ceiling", "°C", [
-        ("tctl_lim", "Tctl limit", None),
-        ("stt_lim", "STT limit", None),
-        ("thm_gfx_lim", "GFX limit", None),
-        ("thm_soc_lim", "SoC limit", None),
-    ], floor0=False, height=96,
-        note="a step down here throttles far harder than a power cut"),
-    PaneSpec("Unused budget", "W", [
-        ("ppt_slow_head", "PPT slow spare", None),
-        ("stapm_head", "STAPM spare", None),
-    ], height=96,
-        note="≈0 = power-limited; large while clocks are low = clamped"),
-    PaneSpec("Rail power", "W", [
-        ("core_power_sum", "cores", None),
-        ("gpu_power", "amdgpu", None),
-        ("ppt_apu", "APU", "ppt_apu_lim"),
-        ("batt_power", "battery", None),
-    ]),
+    ], note="dashed = that limit at the time, not the limit now"),
+    # Second, not last: EDC is measured at 67-80% duty at idle on this machine,
+    # so current binds here more often than power does.
     PaneSpec("VRM current", "A", [
         ("edc", "EDC core", "edc_lim"),
         ("tdc", "TDC core", "tdc_lim"),
         ("edc_soc", "EDC SoC", "edc_soc_lim"),
         ("tdc_soc", "TDC SoC", "tdc_soc_lim"),
-    ], note="EDC often binds before power does"),
+    ], note="often binds before power does"),
+    # ppt_apu is not plotted: it reads a constant 0 on this part in every state
+    # tested, so it is a flat line at the axis floor that only costs a colour
+    # slot. Still recorded, in case it means something on another SKU.
+    # batt_power is kept despite reading 0 on AC -- that zero is information.
+    PaneSpec("Rail power", "W", [
+        ("core_power_sum", "cores", None),
+        ("gpu_power", "amdgpu", None),
+        ("batt_power", "battery", None),
+    ]),
     PaneSpec("SMU temperature", "°C", [
         ("tctl", "Tctl", "tctl_lim"),
         ("stt", "STT skin", "stt_lim"),
@@ -895,9 +893,9 @@ PANES = [
         ("socclk", "socclk", None),
     ]),
     PaneSpec("GPU clock", "MHz", [
-        ("sclk_hw", "sclk achieved", None),
-        ("gfx_permit", "SMU permits", "gfx_permit_max", True),
-    ], note="gap between the two is unused GPU headroom"),
+        ("gfx_clk", "gfx (SMU, instant)", "gfx_clk_max", True),
+        ("sclk_hw", "sclk (DPM level)", None),
+    ], note="SMU samples instantaneously; DPM reports a coarse level"),
     PaneSpec("Utilisation", "%", [
         ("cpu_busy", "CPU busy", None),
         ("gpu_busy", "GPU busy", None),
@@ -1294,7 +1292,6 @@ class ChartPane(QWidget):
             if self.view.overlay is not None:
                 self._draw_store(p, r, self.view.overlay, ghost=True)
             self._draw_store(p, r, self.view.store, ghost=False)
-            self._draw_limits(p, r)
             self._draw_end_labels(p, r)
         self._draw_header(p)
         self._draw_cursor(p, r)
@@ -1359,30 +1356,21 @@ class ChartPane(QWidget):
             p.setPen(pen)
             for poly in polylines(xpx, ypx, r.left(), w):
                 p.drawPolyline(poly)
-        p.setClipping(False)
 
-    def _draw_limits(self, p, r):
-        """Limits are reference lines, not series: same hue as the series they
-        bound, dashed and dimmed so they read as a ceiling rather than as a
-        fifth trace. The number itself lives in the legend as `value / limit`
-        -- printing it on the line as well just piles text onto the plot."""
-        store = self.view.store
-        if store.n == 0:
-            return
-        p.setClipRect(r)
-        for i, s in self._visible_series():
-            if not s.limit:
-                continue
-            lim = store.latest(s.limit)
-            if lim is None or not math.isfinite(lim):
-                continue
-            y = self.y_of(lim)
-            if not (r.top() - 2 <= y <= r.bottom() + 2):
-                continue
-            pen = QPen(alpha(QColor(SERIES[i % len(SERIES)]), 120), 1.0,
-                       Qt.PenStyle.DashLine)
-            p.setPen(pen)
-            p.drawLine(QPointF(r.left(), y), QPointF(r.right(), y))
+            # The limit, as the time series it actually is. It used to be a
+            # flat line at whatever the limit read *now*, drawn across the
+            # whole window -- which silently redrew history against a ceiling
+            # that was not in force at the time. On this machine the ceilings
+            # move constantly, so that was not a hypothetical error.
+            if s.limit and not ghost:
+                la = store.col(s.limit)
+                if la is not None:
+                    lypx = (r.bottom()
+                            - (la[i0:i1].astype(np.float64) - self._ylo) * ysc)
+                    lpen = QPen(alpha(col, 120), 1.0, Qt.PenStyle.DashLine)
+                    p.setPen(lpen)
+                    for poly in polylines(xpx, lypx, r.left(), w):
+                        p.drawPolyline(poly)
         p.setClipping(False)
 
     def _draw_end_labels(self, p, r):
@@ -1448,12 +1436,19 @@ class ChartPane(QWidget):
         x = self.width() - 8
         for i in reversed(range(len(self.spec.series))):
             s = self.spec.series[i]
-            v = store.at(s.key, t) if t is not None else store.latest(s.key)
+            # Value and limit are read at the same instant. Reading the value
+            # at the crosshair but the limit at "now" compared two different
+            # moments, which mattered as soon as the limits started moving.
+            if t is not None:
+                v = store.at(s.key, t)
+                lim = store.at(s.limit, t) if s.limit else None
+            else:
+                v = store.latest(s.key)
+                lim = store.latest(s.limit) if s.limit else None
             txt = f"{s.label} {fmt_val(v, self.spec.unit)}"
-            lim = store.latest(s.limit) if s.limit else None
             if lim is not None and math.isfinite(lim) and lim > 0:
                 txt += f"/{fmt_val(lim, self.spec.unit)}"
-            flag = self._limit_flag(store, s, v)
+            flag = self._limit_flag(s, v, lim)
             if flag:
                 txt += f"  {flag[0]}"
             w = fm.horizontalAdvance(txt) + 20
@@ -1481,15 +1476,15 @@ class ChartPane(QWidget):
             self.spec.series[i].hit = (x, x + w)
 
     @staticmethod
-    def _limit_flag(store, s, v):
+    def _limit_flag(s, v, lim):
         """(text, colour) when a series is at or near its ceiling.
 
         The word is what carries the meaning; the colour only reinforces it.
+        Both arguments must come from the same instant.
         """
-        if v is None or not s.limit or s.good_high:
+        if v is None or lim is None or not s.limit or s.good_high:
             return None
-        lim = store.latest(s.limit)
-        if not lim or lim <= 0:
+        if not math.isfinite(lim) or lim <= 0:
             return None
         frac = v / lim
         if frac >= 0.98:
