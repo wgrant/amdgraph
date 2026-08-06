@@ -923,9 +923,28 @@ PANES = [
         ("fan1", "fan 1", None),
         ("fan2", "fan 2", None),
     ], height=90),
-    PaneSpec("Reliability", "FIT", [
-        ("fit", "FIT", "fit_lim"),
-    ], height=76),
+    # No Reliability/FIT pane. FIT itself is real -- Failures In Time, the
+    # ageing/electromigration budget, which AMD's SMU spends by capping
+    # voltage (the desktop table exposes FIT_VOLTAGE / FIT_PRE_VOLTAGE beside
+    # the FIT_LIMIT / FIT_VALUE pair, and the kernel has an
+    # SMU_THROTTLER_FIT_BIT, though not for Phoenix).
+    #
+    # What is not established is that indices 26/27 are it on this table.
+    # They carry the FIT labels only by the APU (limit, value) convention,
+    # never confirmed for Phoenix, and they do not behave like a pair:
+    # idx27/idx26 holds a near-constant 0.39% (0.29-0.58% observed), so the
+    # "value" never approaches its "limit", and both drift with temperature
+    # in a way no failure-rate budget explains. Their neighbours 24, 25, 30
+    # and 31 all read a constant zero, so the pairing convention demonstrably
+    # does not hold across this block.
+    #
+    # Drawing them as value-against-ceiling asserted a constraint that could
+    # not be substantiated, so the pane is gone; both are still recorded.
+    #
+    # Worth a look if this is ever picked up again: index 28 correlates -0.80
+    # with temperature, frequency and voltage alike while index 29 correlates
+    # +0.89/+0.93/+0.94. That is the shape of a genuine voltage ceiling being
+    # lowered by a reliability model, with 29 as the VID beneath it.
     # Step traces. Unitless on purpose -- these are states, not quantities, and
     # the only thing being read off them is when they change.
     PaneSpec("Platform state", "", [
