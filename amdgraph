@@ -136,6 +136,41 @@ N_CORES = 8
 
 CARD = "/sys/class/drm/card1/device"
 CPU_BASE = "/sys/devices/system/cpu"
+GPU_METRICS = f"{CARD}/gpu_metrics"
+
+# The SMU's own answer to "why am I being held back", which beats inferring it
+# from limits and values. amdgpu exports it in the gpu_metrics blob; this is
+# the same source amdgpu_top decodes.
+#
+# Bit meanings are ASIC-dependent and these are Phoenix's, taken from the
+# kernel that drives this part: smu13_driver_if_v13_0_4.h, reached via
+# amdgpu_smu.c IP_VERSION(13, 0, 4) / (13, 0, 11) -> smu_v13_0_4_set_ppt_funcs,
+# whose get_gpu_metrics does `gpu_metrics->throttle_status =
+# metrics.ThrottlerStatus`. Do not reuse this table for another ASIC.
+#
+# Offset 108 and the (2, 1) version guard below are specific to
+# gpu_metrics_v2_1, the 120-byte layout this machine reports. Later revisions
+# move the field and add an ASIC-independent bitmask, so we decode nothing but
+# the layout that was actually verified.
+GM_VERSION = (2, 1)
+GM_SIZE = 120
+GM_THROTTLE_OFF = 108
+
+THROTTLE_BITS = [
+    (0,  "SPL",         "power"),
+    (1,  "FPPT",        "power"),
+    (2,  "SPPT",        "power"),
+    (3,  "SPPT APU",    "power"),
+    (4,  "THM core",    "thermal"),
+    (5,  "THM GFX",     "thermal"),
+    (6,  "THM SoC",     "thermal"),
+    (7,  "TDC VDD",     "current"),
+    (8,  "TDC SoC",     "current"),
+    (9,  "PROCHOT CPU", "prochot"),
+    (10, "PROCHOT GFX", "prochot"),
+    (11, "EDC CPU",     "current"),
+    (12, "EDC GFX",     "current"),
+]
 TPACPI = "/sys/devices/platform/thinkpad_acpi"
 PLATFORM_PROFILE = "/sys/firmware/acpi/platform_profile"
 
@@ -254,6 +289,7 @@ class Sampler:
         self.slow = {}
         self.pm_ok = False
         self.pm_note = ""
+        self.gm_ok, self.gm_note = self._check_gpu_metrics()
         try:
             with open(PM_VERSION, "rb") as f:
                 ver = struct.unpack("<I", f.read(4))[0]
@@ -267,6 +303,25 @@ class Sampler:
                             "SMU panes are empty.")
             return
         self.pm_ok = True
+
+    @staticmethod
+    def _check_gpu_metrics():
+        """Refuse to decode a layout we have not verified. The throttler bits
+        are ASIC-dependent and the field moves between revisions, so a wrong
+        guess would label the wrong cap reason -- worse than showing none."""
+        try:
+            with open(GPU_METRICS, "rb") as f:
+                raw = f.read()
+        except OSError:
+            return False, "gpu_metrics unavailable — no cap reasons"
+        if len(raw) < 4:
+            return False, "gpu_metrics too short — no cap reasons"
+        size, fmt_rev, cont_rev = struct.unpack_from("<HBB", raw, 0)
+        if (fmt_rev, cont_rev) != GM_VERSION or size != GM_SIZE:
+            return False, (f"gpu_metrics v{fmt_rev}_{cont_rev} ({size}B) is not "
+                           f"decoded (this build maps v{GM_VERSION[0]}_"
+                           f"{GM_VERSION[1]}, {GM_SIZE}B) — no cap reasons")
+        return True, ""
 
     def _pm(self, s):
         if not self.pm_ok:
@@ -311,10 +366,27 @@ class Sampler:
             if val in s and lim in s:
                 s[name] = s[lim] - s[val]
 
+    def _throttle(self, s):
+        """Decode the SMU throttler bitmask, if this kernel's layout matches."""
+        if not self.gm_ok:
+            return
+        try:
+            with open(GPU_METRICS, "rb") as f:
+                raw = f.read()
+        except OSError:
+            return
+        if len(raw) < GM_THROTTLE_OFF + 4:
+            return
+        ts = struct.unpack_from("<I", raw, GM_THROTTLE_OFF)[0]
+        s["throttle_raw"] = float(ts)
+        for bit, _name, _fam in THROTTLE_BITS:
+            s[f"thr{bit}"] = float((ts >> bit) & 1)
+
     def sample(self):
         s = {}
         self.tick += 1
         self._pm(s)
+        self._throttle(s)
 
         s["cpu_busy"] = self.cpubusy.sample()
         s["gpu_busy"] = read_num(f"{CARD}/gpu_busy_percent")
@@ -744,7 +816,10 @@ HEAT_MODES = [
     ("core_cc6", "C6 residency", "%", 0.0, 100.0),
 ]
 
-# Where the per-core strip is inserted in the pane column.
+# Where the two raster strips are inserted in the pane column. The cap-reason
+# strip goes first, above everything: it is the answer, and the panes below it
+# are the corroboration.
+THROTTLE_FIRST = True
 HEAT_AFTER = "CPU clock"
 
 
@@ -817,7 +892,8 @@ class View:
 # Drawing helpers
 # --------------------------------------------------------------------------
 
-LEFT = 64          # y-axis gutter; identical in every pane so they line up
+LEFT = 72          # y-axis gutter; identical in every pane so they line up
+                   # (and wide enough for the longest cap-reason row label)
 RIGHT = 104        # room for end-of-line direct labels
 TOP = 26
 BOTTOM = 6
@@ -1353,6 +1429,193 @@ class ChartPane(QWidget):
 # Per-core heat strip
 # --------------------------------------------------------------------------
 
+class ThrottlePane(QWidget):
+    """One row per SMU throttler bit, lit where that reason was active.
+
+    This is the pane the rest of the window exists to explain. Thirteen
+    reasons is far past where categorical colour stays separable, so identity
+    comes from the row label and the fixed vertical order; colour only groups
+    them into families, and PROCHOT gets the reserved critical step because it
+    means an agent outside the SMU pulled the brake.
+
+    Currently-active reasons are also spelled out in the header, in words --
+    a lit cell in a raster is easy to miss, and the whole point is not to miss
+    it.
+    """
+
+    ROW = 11
+    FAMILY = {"power": QColor(SERIES[0]), "thermal": QColor(SERIES[1]),
+              "current": QColor(SERIES[2]), "prochot": CRITICAL}
+
+    cursorMoved = pyqtSignal(object)
+    rangeChanged = pyqtSignal()
+
+    def __init__(self, view, parent=None):
+        super().__init__(parent)
+        self.view = view
+        self.setMouseTracking(True)
+        h = TOP + len(THROTTLE_BITS) * self.ROW + 8
+        self.setMinimumHeight(h)
+        self.setMaximumHeight(h)
+        self.drag_from = self.drag_to = None
+        self._buf = None
+        f = QFont()
+        f.setPointSizeF(max(7.5, f.pointSizeF() - 1.5))
+        self.setFont(f)
+        # Row labels get their own smaller font: "PROCHOT CPU" is the longest
+        # name here and does not fit the shared gutter at body size, and the
+        # gutter width is fixed because every pane has to line up with it.
+        self.label_font = QFont(f)
+        self.label_font.setPointSizeF(max(6.5, f.pointSizeF() - 1.0))
+
+    def plot_rect(self):
+        return QRectF(LEFT, TOP, max(10, self.width() - LEFT - RIGHT),
+                      len(THROTTLE_BITS) * self.ROW)
+
+    def x_of(self, t):
+        r = self.plot_rect()
+        span = max(1e-9, self.view.t1 - self.view.t0)
+        return r.left() + (np.asarray(t) - self.view.t0) / span * r.width()
+
+    def t_of(self, x):
+        r = self.plot_rect()
+        return (self.view.t0 + (x - r.left()) / max(1.0, r.width())
+                * (self.view.t1 - self.view.t0))
+
+    def paintEvent(self, _ev):
+        p = QPainter(self)
+        p.fillRect(self.rect(), PANE_BG)
+        r = self.plot_rect()
+        store = self.view.store
+        fm = QFontMetrics(self.font())
+
+        self._draw_image(p, r, store)
+
+        p.setFont(self.label_font)
+        for i, (_bit, name, fam) in enumerate(THROTTLE_BITS):
+            y = r.top() + i * self.ROW
+            p.setPen(alpha(self.FAMILY[fam], 210))
+            p.drawText(QRectF(0, y, LEFT - 4, self.ROW),
+                       Qt.AlignmentFlag.AlignRight
+                       | Qt.AlignmentFlag.AlignVCenter, name)
+        p.setFont(self.font())
+
+        f = QFont(self.font())
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(INK)
+        p.drawText(QRectF(6, 2, 200, TOP - 4),
+                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                   "Cap reason")
+        p.setFont(self.font())
+
+        # Spell out what is active right now (or under the crosshair).
+        t = self.view.cursor
+        active = []
+        for bit, name, fam in THROTTLE_BITS:
+            v = (store.at(f"thr{bit}", t) if t is not None
+                 else store.latest(f"thr{bit}"))
+            if v:
+                active.append((name, fam))
+        x = 6 + fm.horizontalAdvance("Cap reason") + 16
+        if not active:
+            p.setPen(MUTED)
+            p.drawText(QRectF(x, 2, 300, TOP - 4),
+                       Qt.AlignmentFlag.AlignLeft
+                       | Qt.AlignmentFlag.AlignVCenter,
+                       "none — nothing is holding it back")
+        else:
+            for name, fam in active:
+                txt = f"◀ {name}"
+                w = fm.horizontalAdvance(txt) + 12
+                if x + w > self.width() - 6:
+                    break
+                p.setPen(self.FAMILY[fam])
+                p.drawText(QRectF(x, 2, w, TOP - 4),
+                           Qt.AlignmentFlag.AlignLeft
+                           | Qt.AlignmentFlag.AlignVCenter, txt)
+                x += w
+
+        if t is not None:
+            cx = float(self.x_of(t))
+            if r.left() <= cx <= r.right():
+                p.setPen(QPen(alpha(INK, 150), 1))
+                p.drawLine(QPointF(cx, r.top()), QPointF(cx, r.bottom()))
+        if self.drag_from is not None and self.drag_to is not None:
+            x0, x1 = sorted((float(self.x_of(self.drag_from)),
+                             float(self.x_of(self.drag_to))))
+            p.fillRect(QRectF(max(x0, r.left()), r.top(),
+                              min(x1, r.right()) - max(x0, r.left()),
+                              r.height()), alpha(QColor(SERIES[0]), 40))
+        p.end()
+
+    def _draw_image(self, p, r, store):
+        n = len(THROTTLE_BITS)
+        w = max(1, int(r.width()))
+        img = np.zeros((n, w, 4), dtype=np.uint8)
+        img[:, :, :] = (PANE_BG.blue(), PANE_BG.green(), PANE_BG.red(), 255)
+
+        if store.n:
+            ts = store.times()
+            i0 = int(np.searchsorted(ts, self.view.t0, side="left"))
+            i1 = int(np.searchsorted(ts, self.view.t1, side="right"))
+            if i1 > i0:
+                span = max(1e-9, self.view.t1 - self.view.t0)
+                cols = np.clip((((ts[i0:i1] - self.view.t0) / span)
+                                * (w - 1)).astype(np.int64), 0, w - 1)
+                for i, (bit, _name, fam) in enumerate(THROTTLE_BITS):
+                    a = store.col(f"thr{bit}")
+                    if a is None:
+                        continue
+                    seg = a[i0:i1]
+                    on = np.nan_to_num(seg, nan=0.0) > 0.5
+                    if not on.any():
+                        continue
+                    c = self.FAMILY[fam]
+                    img[i, cols[on]] = (c.blue(), c.green(), c.red(), 255)
+        self._buf = np.ascontiguousarray(img)
+        qimg = QImage(self._buf.data, w, n, w * 4,
+                      QImage.Format.Format_ARGB32)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
+        p.drawImage(r, qimg)
+        p.setPen(QPen(PANE_BG, 1))
+        for i in range(1, n):
+            y = r.top() + i * self.ROW
+            p.drawLine(QPointF(r.left(), y), QPointF(r.right(), y))
+
+    def mouseMoveEvent(self, ev):
+        t = self.t_of(ev.position().x())
+        if self.drag_from is not None:
+            self.drag_to = t
+        self.cursorMoved.emit(t)
+
+    def leaveEvent(self, _ev):
+        if self.drag_from is None:
+            self.cursorMoved.emit(None)
+
+    def mousePressEvent(self, ev):
+        if ev.button() == Qt.MouseButton.LeftButton:
+            self.drag_from = self.drag_to = self.t_of(ev.position().x())
+
+    def mouseReleaseEvent(self, ev):
+        if (ev.button() == Qt.MouseButton.LeftButton
+                and self.drag_from is not None):
+            t = self.t_of(ev.position().x())
+            if abs(t - self.drag_from) > 1.5:
+                self.view.zoom_to(*sorted((self.drag_from, t)))
+                self.rangeChanged.emit()
+            self.drag_from = self.drag_to = None
+            self.update()
+
+    def wheelEvent(self, ev):
+        d = ev.angleDelta().y()
+        if d:
+            self.view.zoom_at(self.t_of(ev.position().x()),
+                              0.8 if d > 0 else 1.25)
+            self.rangeChanged.emit()
+        ev.accept()
+
+
 class CorePane(QWidget):
     """One row per physical core, colour = the selected metric.
 
@@ -1665,6 +1928,12 @@ class Main(QMainWindow):
         self.col.setContentsMargins(0, 0, 0, 0)
         self.col.setSpacing(2)
         self.panes = []
+        if THROTTLE_FIRST:
+            self.throttle = ThrottlePane(self.view)
+            self.throttle.cursorMoved.connect(self.on_cursor)
+            self.throttle.rangeChanged.connect(self.on_range)
+            self.col.addWidget(self.throttle)
+            self.panes.append(self.throttle)
         for spec in PANES:
             pane = ChartPane(spec, self.view)
             pane.cursorMoved.connect(self.on_cursor)
@@ -1701,8 +1970,9 @@ class Main(QMainWindow):
 
         self._install_shortcuts()
 
-        if self.sampler.pm_note:
-            self.status.setText(self.sampler.pm_note)
+        notes = [n for n in (self.sampler.pm_note, self.sampler.gm_note) if n]
+        if notes:
+            self.status.setText("   ·   ".join(notes))
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.tick)
@@ -1854,8 +2124,9 @@ class Main(QMainWindow):
             bits.append(f"recording → {self.recorder.path}")
         if self.view.overlay is not None:
             bits.append(f"overlay: {self.view.overlay_name}")
-        if self.sampler.pm_note:
-            bits.append(self.sampler.pm_note)
+        for note in (self.sampler.pm_note, self.sampler.gm_note):
+            if note:
+                bits.append(note)
         self.status.setText("   ·   ".join(bits))
 
     # -- handlers ---------------------------------------------------------
@@ -1946,6 +2217,8 @@ class Main(QMainWindow):
         for base in PM_CORE:
             keys += [f"{base}_{i}" for i in range(N_CORES)]
             keys += [f"{base}_mean", f"{base}_max"]
+        keys += ["throttle_raw"]
+        keys += [f"thr{b}" for b, _n, _f in THROTTLE_BITS]
         keys += ["stapm_head", "ppt_slow_head", "ppt_fast_head",
                  "core_power_sum", "cpu_busy", "gpu_busy", "sclk", "sclk_hw",
                  "socclk", "gpu_edge", "gpu_power", "ec_skin", "ec_cpu",
