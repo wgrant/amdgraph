@@ -34,12 +34,13 @@ LAYER = {
     "smu.strix_halo": 0, "smu.strix_point": 0, "smu.pm_tables": 0,
     "backends.base": 1, "backends.host": 1, "backends.platform": 1,
     "backends.zen_smu": 1, "backends.amdgpu": 1,
-    "normalize": 2, "sampler": 2, "store": 2,
-    "palette": 3, "panes": 3, "service": 3, "session": 3, "view": 3,
+    "normalize": 2, "protocol": 2, "sampler": 2, "store": 2,
+    "palette": 3, "panes": 3, "remote": 3, "service": 3, "session": 3,
+    "view": 3,
     "render": 4,
     "timepane": 5, "frame": 5, "chart": 5, "rasters": 5, "axis": 5,
     "section": 5,
-    "tui": 6, "window": 6, "__main__": 6,
+    "daemon": 6, "tui": 6, "window": 6, "__main__": 6,
 }
 
 # Edges within one layer, which the numbering cannot express. Each is a base
@@ -56,6 +57,7 @@ ALLOWED_SAME_LAYER = {
     ("backends.zen_smu", "backends.base"),
     ("backends.amdgpu", "backends.base"),
     ("sampler", "normalize"),
+    ("protocol", "store"),
     ("service", "session"),
     ("chart", "timepane"),
     ("rasters", "timepane"),

@@ -17,6 +17,7 @@ dependencies = [
 [project.scripts]
 amdgraph = "amdgraph.__main__:main"
 amdgraph-tui = "amdgraph.tui:main"
+amdgraphd = "amdgraph.daemon:main"
 
 [dependency-groups]
 dev = [
