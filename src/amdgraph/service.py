@@ -26,6 +26,7 @@ class LocalHistoryService:
 
     def sample_once(self):
         sample = self.source.sample()
+        self.last_sample = sample
         t = time.monotonic() - self.started
         self.store.append(t, sample)
         if self.recorder is not None:

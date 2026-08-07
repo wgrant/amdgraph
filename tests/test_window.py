@@ -396,7 +396,7 @@ class TestHandlers:
         main.close()
         main.close()
         assert main.recorder is None
-        assert source.closed == 2
+        assert source.closed == 1
 
 
 class TestShortcuts:

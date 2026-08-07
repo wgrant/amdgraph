@@ -9,9 +9,6 @@ May import: everything.
 """
 
 import os
-import socket
-import time
-from datetime import datetime
 
 from PyQt6.QtCore import QSize, Qt, QTimer
 from PyQt6.QtGui import QAction, QKeySequence
@@ -28,10 +25,9 @@ from .palette import INK, MUTED, SURFACE
 from .panes import HEAT_AFTER_ID, PANES, THROTTLE_FIRST, available_catalogue
 from .rasters import core_frame, throttle_frame
 from .render import fmt_time
-from .sampler import Sampler
+from .service import LocalHistoryService
 from .section import SectionHeader
-from .session import DATA_DIR, Recorder, load_session, record_keys
-from .store import Store
+from .session import DATA_DIR, load_session
 from .view import View
 
 
@@ -48,7 +44,7 @@ def tilde(path):
 
 
 class Main(QMainWindow):
-    def __init__(self, interval, open_path=None, source=None):
+    def __init__(self, interval, open_path=None, source=None, service=None):
         """`source` is anything implementing Sampler's protocol; it defaults to
         reading this machine. Injecting it is what lets the window be built and
         driven with no hardware present, and is the seam a second platform's
@@ -57,27 +53,29 @@ class Main(QMainWindow):
         self.setWindowTitle("amdgraph")
         self.resize(1180, 900)
         self.interval = interval
-        self.sampler = source if source is not None else Sampler()
-        self.store = Store()
+        self.service = (service if service is not None else
+                        LocalHistoryService(interval, source))
+        # Compatibility aliases for frontend code and third-party sources;
+        # ownership lives in the service.
+        self.sampler = self.service.source
+        self.store = self.service.store
         self.view = View(self.store)
         self.view.window = 300.0
-        self.recorder = None
+        self.recorder = self.service.recorder
         self.live = True
         self._cursor_pending = False
-        self.t_start = time.monotonic()
+        self.t_start = self.service.started
         # One real sample doubles as the capability inventory. Backends emit
         # owned keys with None when a reading is temporarily absent, so this
         # filters unsupported series without mistaking one missed read for an
         # unsupported sensor. It is also the one construction-time sample the
         # window has always taken; it merely moves before assembly.
-        initial = self.sampler.sample()
+        initial = self.service.last_sample
         detected_cores = initial.get("core_count")
         self.core_count = (MAX_CORE_SLOTS if detected_cores is None else
                            max(1, min(MAX_CORE_SLOTS, int(detected_cores))))
-        capabilities = (self.sampler.metric_keys()
-                        if hasattr(self.sampler, "metric_keys") else initial)
+        capabilities = self.service.capabilities()
         self.catalogue, self.catalogue_groups = available_catalogue(capabilities)
-        self.store.append(time.monotonic() - self.t_start, initial)
 
         # Size the shared gutters to the text that actually has to fit, before
         # any pane is built. Fixed pixel counts clipped labels on any desktop
@@ -175,7 +173,7 @@ class Main(QMainWindow):
 
         self._install_shortcuts()
 
-        notes = self.sampler.notes()
+        notes = self.service.notes()
         if notes:
             self.status.setText("   ·   ".join(notes))
 
@@ -326,11 +324,9 @@ class Main(QMainWindow):
         # still. History keeps filling in behind you, so releasing the freeze
         # shows what happened while you were reading, not a gap.
         if self.live:
-            t = time.monotonic() - self.t_start
-            s = self.sampler.sample()
-            self.store.append(t, s)
-            if self.recorder:
-                self.recorder.write(t, s)
+            self.service.sample_once()
+            self.store = self.service.store
+            self.recorder = self.service.recorder
         self.view.update_range()
         self.refresh()
 
@@ -363,7 +359,7 @@ class Main(QMainWindow):
             bits.append(f"recording → {tilde(self.recorder.path)}")
         if self.view.overlay is not None:
             bits.append(f"overlay: {self.view.overlay_name}")
-        bits.extend(self.sampler.notes())
+        bits.extend(self.service.notes())
         self.status.setText("   ·   ".join(bits))
 
     # -- handlers ---------------------------------------------------------
@@ -394,9 +390,9 @@ class Main(QMainWindow):
     def on_reset(self):
         """Discard live history. Harmless while browsing a recording -- the
         live buffer is a separate store from the one being viewed."""
-        self.store = Store()
-        self.t_start = time.monotonic()
-        self.sampler.reset()
+        self.service.reset()
+        self.store = self.service.store
+        self.t_start = self.service.started
         if self.live:
             self.view.store = self.store
             self.view.markers = []
@@ -418,19 +414,9 @@ class Main(QMainWindow):
     def on_record(self, on):
         if on:
             try:
-                os.makedirs(DATA_DIR, exist_ok=True)
-                name = datetime.now().strftime("%Y%m%d-%H%M%S") + ".csv"
-                path = os.path.join(DATA_DIR, name)
-                meta = {
-                    "amdgraph": "session v1",
-                    "started": datetime.now().astimezone().isoformat(),
-                    "host": socket.gethostname(),
-                    "interval": f"{self.interval:g}",
-                    **self.sampler.meta(),
-                }
-                keys = (self.sampler.metric_keys()
-                        if hasattr(self.sampler, "metric_keys") else record_keys())
-                self.recorder = Recorder(path, keys, meta)
+                self.service.data_dir = DATA_DIR
+                self.service.start_recording()
+                self.recorder = self.service.recorder
             except OSError as e:
                 QMessageBox.warning(self, "amdgraph",
                                     f"Cannot record: {e}")
@@ -438,9 +424,8 @@ class Main(QMainWindow):
                 return
             self.btn_rec.setText("■ Stop")
         else:
-            if self.recorder:
-                self.recorder.close()
-            self.recorder = None
+            self.service.stop_recording()
+            self.recorder = self.service.recorder
             self.btn_rec.setText("● Record")
         self.refresh()
 
@@ -480,14 +465,13 @@ class Main(QMainWindow):
         if not ok:
             return
         label = (text or "").strip() or "mark"
-        self.view.markers.append((t, label))
-        if self.recorder:
-            self.recorder.mark(t, label)
+        self.service.mark(label, t)
+        self.view.markers = list(self.service.store.markers)
         self.refresh()
 
     def on_cap_rate(self, hz):
         """From the Cap reason pane's context menu."""
-        self.sampler.set_cap_rate(hz)
+        self.service.set_cap_rate(hz)
         self.refresh()
 
     def on_clear_overlay(self):
@@ -547,8 +531,6 @@ class Main(QMainWindow):
     def closeEvent(self, ev):
         # Qt can deliver this more than once -- an explicit close() followed by
         # the application quitting, say -- so it has to be safe to repeat.
-        if self.recorder:
-            self.recorder.close()
-            self.recorder = None
-        self.sampler.close()
+        self.service.close()
+        self.recorder = None
         super().closeEvent(ev)
