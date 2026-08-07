@@ -26,9 +26,9 @@ def record_keys():
     a recording you have to re-take because you did not log the column you now
     want is worse than a slightly larger file."""
     keys, core_bases = [], []
-    for scalars, cores, _ncores in PROFILES.values():
-        keys += list(scalars)
-        core_bases += list(cores)
+    for layout in PROFILES.values():
+        keys += list(layout.scalars)
+        core_bases += list(layout.cores)
     for base in dict.fromkeys(core_bases):
         keys += [f"{base}_{i}" for i in range(N_CORES)]
         keys += [f"{base}_mean", f"{base}_max"]

@@ -17,7 +17,10 @@ from .base import Backend
 class ZenSmuBackend(Backend):
     def __init__(self, version=PHOENIX_VERSION):
         self.version = version
-        self.scalars, self.cores, self.ncores = PROFILES[version]
+        self.layout = PROFILES[version]
+        self.scalars = self.layout.scalars
+        self.cores = self.layout.cores
+        self.ncores = self.layout.core_slots
 
     def sample(self, s, fs):
         raw = fs.read_bytes(TABLE)
@@ -49,13 +52,14 @@ class ZenSmuBackend(Backend):
         if "core_power_mean" in s:
             s["core_power_sum"] = s["core_power_mean"] * active_cores
 
-        if self.version != PHOENIX_VERSION:
+        if self.layout.thermal_clusters:
             # Strix Halo reports one thermal value per eight-core cluster. The
             # governing CPU temperature is the hotter cluster; its conservative
             # ceiling is the lower of their two limits.
-            temps = [s[k] for k in ("thm_core0", "thm_core1") if k in s]
-            limits = [s[k] for k in ("thm_core0_lim", "thm_core1_lim")
-                      if k in s]
+            temps = [s[value] for value, _limit in
+                     self.layout.thermal_clusters if value in s]
+            limits = [s[limit] for _value, limit in
+                      self.layout.thermal_clusters if limit in s]
             if temps:
                 s["tctl"] = max(temps)
             if limits:
