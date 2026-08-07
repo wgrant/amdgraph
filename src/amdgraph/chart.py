@@ -16,8 +16,8 @@ from . import render
 from .frame import PaneFrame, Readout
 from .palette import (AXIS, CRITICAL, GRID, INK, INK_DIM, MUTED, PANE_BG,
                       SERIES, WARNING, alpha)
-from .render import (HEADER_H, draw_markers, fmt_val, nice_range,
-                     polylines, time_ticks)
+from .render import (draw_markers, fmt_val, nice_range, polylines,
+                     time_ticks)
 from .timepane import TimePane
 
 
@@ -364,7 +364,7 @@ class ChartLegend(Readout):
             if s.limit and not s.good_high:
                 txt += "  ◀ CAPPED"
             w += fm.horizontalAdvance(txt) + 20
-        return QSize(w, HEADER_H)
+        return QSize(w, render.HEADER_H)
 
     def paintEvent(self, _ev):
         p = QPainter(self)

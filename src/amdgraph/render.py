@@ -41,6 +41,7 @@ BOTTOM = 6
 
 _DEFAULT_LEFT, _DEFAULT_RIGHT = LEFT, RIGHT
 _DEFAULT_TOP, _DEFAULT_BOTTOM = TOP, BOTTOM
+_DEFAULT_HEADER_H = HEADER_H
 
 
 def pane_font():
@@ -68,7 +69,7 @@ def calibrate(font, row_labels, series_labels):
     Never narrows below the defaults: the left gutter also has to hold y-axis
     tick text, which is not known until there is data.
     """
-    global LEFT, RIGHT, TOP, BOTTOM
+    global LEFT, RIGHT, TOP, BOTTOM, HEADER_H
     fm = QFontMetrics(font)
     LEFT = max(_DEFAULT_LEFT,
                max((fm.horizontalAdvance(s) for s in row_labels), default=0)
@@ -79,6 +80,8 @@ def calibrate(font, row_labels, series_labels):
     half = int(math.ceil(fm.height() / 2)) + 1
     TOP = max(_DEFAULT_TOP, half)
     BOTTOM = max(_DEFAULT_BOTTOM, half)
+    # The header holds a bold title and, on some panes, a combo box.
+    HEADER_H = max(_DEFAULT_HEADER_H, fm.height() + 8)
     return LEFT, RIGHT
 
 

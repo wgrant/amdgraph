@@ -22,6 +22,7 @@ from PyQt6.QtGui import (QFont, QFontMetrics, QImage,         # noqa: E402
 from PyQt6.QtWidgets import QComboBox                         # noqa: E402
 
 from amdgraph import render                                   # noqa: E402
+from amdgraph.axis import TimeAxis                            # noqa: E402
 from amdgraph.chart import ChartPane, chart_frame             # noqa: E402
 from amdgraph.fields import N_CORES, THROTTLE_BITS            # noqa: E402
 from amdgraph.panes import (CAP_DEFAULT, CAP_RATES,            # noqa: E402
@@ -150,6 +151,72 @@ class TestGutters:
         render_pane(strip)
         assert pane.plot_rect().left() == strip.plot_rect().left()
         assert pane.plot_rect().right() == strip.plot_rect().right()
+
+
+class TestTextFitsItsBox:
+    """Every fixed pixel count that has to hold text, checked against the font
+    that will actually be drawn in it.
+
+    Four of these were already a pixel or two short at the smallest font this
+    program uses, and would have clipped outright on a normal desktop -- the
+    same failure as the gutters, which is how it was found.
+    """
+
+    @pytest.fixture(autouse=True)
+    def restore(self, qapp):
+        before = (render.LEFT, render.RIGHT, render.TOP, render.BOTTOM,
+                  render.HEADER_H, qapp.font())
+        yield
+        (render.LEFT, render.RIGHT, render.TOP, render.BOTTOM,
+         render.HEADER_H) = before[:5]
+        qapp.setFont(before[5])
+
+    @staticmethod
+    def calibrated(pt):
+        """Set the *application* font, which is what everything derives from.
+
+        Passing a font only to calibrate() left pane_font() reading the app
+        default, so the row-height cases passed without exercising anything --
+        the panes were built at the same size every time.
+        """
+        from PyQt6.QtWidgets import QApplication
+        f = QFont()
+        f.setPointSizeF(pt)
+        QApplication.instance().setFont(f)
+        body = render.pane_font()
+        render.calibrate(body, ["PROCHOT CPU", "core 7"], ["mean effective"])
+        return body
+
+    @pytest.mark.parametrize("pt", [6.0, 7.5, 9.0, 11.0, 14.0, 20.0])
+    def test_raster_rows_hold_their_labels(self, view, pt):
+        self.calibrated(pt)
+        t = ThrottlePane(view)
+        assert t.ROW >= QFontMetrics(t.label_font).height()
+        c = CorePane(view)
+        assert c.ROW >= QFontMetrics(c.font()).height()
+
+    @pytest.mark.parametrize("pt", [6.0, 7.5, 9.0, 11.0, 14.0, 20.0])
+    def test_the_core_pane_reserves_room_for_its_colour_bar(self, view, pt):
+        self.calibrated(pt)
+        c = CorePane(view)
+        c.resize(W, c.minimumHeight())
+        r = c.plot_rect()
+        fm = QFontMetrics(c.font())
+        # 5 px gap, then the bar and its label side by side, then a little air.
+        assert c.height() - r.bottom() >= 5 + max(c.BAR_H, fm.height())
+
+    @pytest.mark.parametrize("pt", [6.0, 7.5, 9.0, 11.0, 14.0, 20.0])
+    def test_the_time_axis_holds_its_tick_labels(self, qapp, view, pt):
+        from PyQt6.QtWidgets import QScrollArea
+        self.calibrated(pt)
+        a = TimeAxis(view, QScrollArea())
+        fm = QFontMetrics(a.font())
+        assert a.height() >= 4 + fm.height()
+
+    @pytest.mark.parametrize("pt", [6.0, 7.5, 9.0, 11.0, 14.0, 20.0])
+    def test_the_header_row_holds_its_title(self, pt):
+        f = self.calibrated(pt)
+        assert render.HEADER_H >= QFontMetrics(f).height()
 
 
 class TestRendering:

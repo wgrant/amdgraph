@@ -24,8 +24,11 @@ class TimeAxis(QWidget):
         super().__init__(parent)
         self.view = view
         self.scroll = scroll
-        self.setFixedHeight(22)
         self.setFont(pane_font())
+        # 4 px of tick, then the label. 22 px held both at the smallest font
+        # this program uses and clipped from about 11 pt upward.
+        fm = QFontMetrics(self.font())
+        self.setFixedHeight(max(22, 4 + fm.height() + 4))
 
     def paintEvent(self, _ev):
         p = QPainter(self)
@@ -47,7 +50,8 @@ class TimeAxis(QWidget):
             p.drawLine(QPointF(x, 0), QPointF(x, 4))
             p.setPen(MUTED)
             lbl = fmt_time(t)
-            p.drawText(QRectF(x - 40, 4, 80, fm.height()),
+            lw = fm.horizontalAdvance(lbl) + 8
+            p.drawText(QRectF(x - lw / 2, 4, lw, fm.height()),
                        Qt.AlignmentFlag.AlignHCenter, lbl)
         if self.view.cursor is not None:
             x = left + (self.view.cursor - self.view.t0) / span * w

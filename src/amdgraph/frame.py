@@ -27,7 +27,7 @@ from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QSizePolicy,
 
 from . import render
 from .palette import INK_DIM, MUTED, PANE_BG, SURFACE, alpha
-from .render import HEADER_H, pane_font
+from .render import pane_font
 
 
 class ElidedLabel(QLabel):
@@ -109,7 +109,7 @@ class PaneFrame(QWidget):
         lay.setSpacing(0)
 
         self.header = QWidget()
-        self.header.setFixedHeight(HEADER_H)
+        self.header.setFixedHeight(render.HEADER_H)
         h = QHBoxLayout(self.header)
         h.setContentsMargins(6, 0, 8, 0)
         h.setSpacing(8)
@@ -126,7 +126,7 @@ class PaneFrame(QWidget):
         # separates it from the words it modifies.
         for c in controls:
             c.setFont(pane_font())
-            c.setFixedHeight(HEADER_H - 6)
+            c.setFixedHeight(render.HEADER_H - 6)
             h.addWidget(c)
 
         if note:
@@ -153,7 +153,7 @@ class PaneFrame(QWidget):
 
         if height is not None:
             self.setFixedHeight(height)
-            body.setFixedHeight(height - HEADER_H)
+            body.setFixedHeight(height - render.HEADER_H)
 
     # -- what the window drives -------------------------------------------
 

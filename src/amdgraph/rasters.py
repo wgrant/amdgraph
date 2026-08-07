@@ -49,13 +49,18 @@ class ThrottlePane(TimePane):
     def __init__(self, view, parent=None):
         super().__init__(view, parent)
         self.cap_hz = CAP_RATES[CAP_DEFAULT][0]
-        self.fix_height(render.TOP + len(THROTTLE_BITS) * self.ROW + 8)
         self._buf = None
         # Row labels get their own smaller font: "PROCHOT CPU" is the longest
         # name here and does not fit the shared gutter at body size. The gutter
         # itself is sized from these strings at startup -- see
         # render.calibrate() -- because it has to be the same in every pane.
         self.label_font = row_label_font()
+        # ROW is a data-density choice, but it also has to hold a line of text,
+        # and 11 px was already a pixel short of the label at the smallest font
+        # this program uses. It grows with the font rather than clipping.
+        self.ROW = max(ThrottlePane.ROW,
+                       QFontMetrics(self.label_font).height())
+        self.fix_height(render.TOP + len(THROTTLE_BITS) * self.ROW + 8)
 
     def plot_rect(self):
         left = self.gutter_left()
@@ -140,8 +145,12 @@ class CorePane(TimePane):
     def __init__(self, view, parent=None):
         super().__init__(view, parent)
         self.mode = 0
-        self.fix_height(render.TOP + N_CORES * self.ROW + 18)
         self._buf = None
+        fm = QFontMetrics(self.font())
+        self.ROW = max(CorePane.ROW, fm.height())
+        # Under the rows: the colour bar and its range, whichever is taller.
+        self._bar_h = 5 + max(self.BAR_H, fm.height()) + 3
+        self.fix_height(render.TOP + N_CORES * self.ROW + self._bar_h)
 
     def set_mode(self, i):
         self.mode = i
@@ -238,19 +247,24 @@ class CorePane(TimePane):
         self.blit_rows(p, r, img, self.ROW)
         return dlo, dhi
 
+    BAR_H = 8
+    BAR_W = 88
+
     def _draw_colorbar(self, p, r, lo, hi, unit):
         fm = QFontMetrics(self.font())
         y = r.bottom() + 5
-        bw, bh = 88, 8
         x = r.left()
-        for i in range(bw):
+        for i in range(self.BAR_W):
             p.setPen(QColor(RAMP[min(len(RAMP) - 1,
-                                     int(i / bw * len(RAMP)))]))
-            p.drawLine(QPointF(x + i, y), QPointF(x + i, y + bh))
+                                     int(i / self.BAR_W * len(RAMP)))]))
+            p.drawLine(QPointF(x + i, y), QPointF(x + i, y + self.BAR_H))
         p.setPen(MUTED)
-        p.drawText(QRectF(x + bw + 6, y - 2, 160, fm.height()),
-                   Qt.AlignmentFlag.AlignLeft,
-                   f"{fmt_val(lo, unit)} → {fmt_val(hi, unit)} {unit}")
+        txt = f"{fmt_val(lo, unit)} → {fmt_val(hi, unit)} {unit}"
+        # Measured, not a fixed 160 px: that box held the text at the smallest
+        # font and cut it off above about 14 pt.
+        p.drawText(QRectF(x + self.BAR_W + 6, y - 2,
+                          fm.horizontalAdvance(txt) + 4, fm.height()),
+                   Qt.AlignmentFlag.AlignLeft, txt)
 
 
 class ThrottleReadout(Readout):
