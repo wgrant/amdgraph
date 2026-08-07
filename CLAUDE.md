@@ -50,7 +50,7 @@ at startup and a from-import binds the stale value, which will make your fix
 appear to do nothing.
 
 **Put the evidence next to the claim.** A comment asserting what a field means
-must say how that was established. The comments in `src/amdgraph/pm_table_*.py` are
+must say how that was established. The comments in `src/amdgraph/smu/*.py` are
 the most valuable thing in the tree; they are why the Phoenix map is trustworthy
 and a transcribed one would not be.
 

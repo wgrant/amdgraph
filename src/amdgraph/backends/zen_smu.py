@@ -10,7 +10,7 @@ May import: fields, sysfs, backends.base.
 
 import struct
 
-from ..pm_tables import (PHOENIX_VERSION, PROFILES, TABLE, VERSION_PATH)
+from ..smu.pm_tables import (PHOENIX_VERSION, PROFILES, TABLE, VERSION_PATH)
 from .base import Backend
 
 

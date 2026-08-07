@@ -13,7 +13,7 @@ import os
 import numpy as np
 
 from .fields import N_CORES, THROTTLE_BITS
-from .pm_tables import PROFILES
+from .smu.pm_tables import PROFILES
 from .store import Store
 
 DATA_DIR = os.path.join(

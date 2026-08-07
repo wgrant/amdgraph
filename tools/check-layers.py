@@ -29,8 +29,8 @@ PKG_NAME = "amdgraph"
 
 # Module -> layer. Lower may not import higher.
 LAYER = {
-    "fields": 0, "sysfs": 0, "pm_table_phoenix": 0,
-    "pm_table_strix_halo": 0, "pm_tables": 0,
+    "fields": 0, "sysfs": 0, "smu.phoenix": 0,
+    "smu.strix_halo": 0, "smu.pm_tables": 0,
     "backends.base": 1, "backends.host": 1, "backends.platform": 1,
     "backends.zen_smu": 1, "backends.amdgpu": 1,
     "sampler": 2, "store": 2,
@@ -44,8 +44,8 @@ LAYER = {
 # Edges within one layer, which the numbering cannot express. Each is a base
 # class or an entry point, not a peer reaching sideways for a helper.
 ALLOWED_SAME_LAYER = {
-    ("pm_tables", "pm_table_phoenix"),
-    ("pm_tables", "pm_table_strix_halo"),
+    ("smu.pm_tables", "smu.phoenix"),
+    ("smu.pm_tables", "smu.strix_halo"),
     ("backends.host", "backends.base"),
     ("backends.platform", "backends.base"),
     ("backends.zen_smu", "backends.base"),

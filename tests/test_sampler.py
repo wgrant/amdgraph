@@ -12,9 +12,10 @@ import struct
 import pytest
 from conftest import gm_blob, pm_blob
 
-from amdgraph import fields, pm_tables
+from amdgraph import fields
 from amdgraph.backends import amdgpu, host, zen_smu
-from amdgraph.pm_tables import PHOENIX_VERSION
+from amdgraph.smu import pm_tables
+from amdgraph.smu.pm_tables import PHOENIX_VERSION
 from amdgraph.sampler import Sampler
 from amdgraph.sysfs import HWMON, ReplayFS
 

@@ -8,11 +8,11 @@ avoid, so the tests that assert it *refuses* are the load-bearing ones.
 import pytest
 from conftest import pm_blob
 
-from amdgraph import fields, pm_tables
+from amdgraph import fields
 from amdgraph.backends import zen_smu
 from amdgraph.fields import N_CORES
-from amdgraph.pm_tables import (PHOENIX_VERSION, PROFILES,
-                               STRIX_HALO_VERSION)
+from amdgraph.smu.pm_tables import (PHOENIX_VERSION, PROFILES,
+                                   STRIX_HALO_VERSION)
 from amdgraph.sysfs import RealFS
 
 

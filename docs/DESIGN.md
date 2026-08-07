@@ -36,8 +36,8 @@ absolute, and plain `import amdgraph.x` alike, because the launcher puts `src/`
 on `sys.path` and all three forms run.
 
 ```
-0  fields  pm_table_*   hardware maps, including one module per SMU table ABI;
-   pm_tables  sysfs     the PM registry; sysfs readers (and FS backends) that
+0  fields  smu/*        hardware maps, including one module per SMU table ABI;
+   sysfs                the PM registry; sysfs readers (and FS backends) that
                         know nothing of it
 1  backends             one module per hardware family, each deciding for
                         itself whether it applies to this machine

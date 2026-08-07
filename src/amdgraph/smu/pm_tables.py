@@ -1,7 +1,6 @@
 """Registry of versioned, experimentally validated SMU PM-table layouts."""
 
-from . import pm_table_phoenix as phoenix
-from . import pm_table_strix_halo as strix_halo
+from . import phoenix, strix_halo
 
 TABLE = "/sys/kernel/ryzen_smu_drv/pm_table"
 VERSION_PATH = "/sys/kernel/ryzen_smu_drv/pm_table_version"
