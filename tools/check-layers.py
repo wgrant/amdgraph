@@ -39,7 +39,7 @@ LAYER = {
     "render": 4,
     "timepane": 5, "frame": 5, "chart": 5, "rasters": 5, "axis": 5,
     "section": 5,
-    "window": 6, "__main__": 6,
+    "tui": 6, "window": 6, "__main__": 6,
 }
 
 # Edges within one layer, which the numbering cannot express. Each is a base

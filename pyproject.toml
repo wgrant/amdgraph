@@ -8,10 +8,15 @@ authors = [{ name = "William Grant", email = "me@williamgrant.id.au" }]
 # 3.9 rather than the interpreter this was written on: SteamOS and other
 # appliance distributions lag, and one of the target machines is a Steam Deck.
 requires-python = ">=3.9"
-dependencies = ["numpy", "PyQt6"]
+dependencies = [
+    "numpy",
+    "PyQt6",
+    "rich>=13",
+]
 
 [project.scripts]
 amdgraph = "amdgraph.__main__:main"
+amdgraph-tui = "amdgraph.tui:main"
 
 [dependency-groups]
 dev = [
