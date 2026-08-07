@@ -23,6 +23,7 @@ from ..fields import (AMD_VENDOR, DRM_DEVICES, GM_CORE_PWR_OFF, GM_PWR_OFF,
                      GM3_STAPM_CURRENT_LIMIT_OFF, GM3_STAPM_LIMIT_OFF,
                      GM3_SYS_PWR_OFF, GM3_VERSION, THROTTLE_BITS)
 from ..sysfs import RealFS, dpm_current, find_drm_device, find_hwmon
+from ..gpu_metrics import v3
 from .base import Backend
 
 
@@ -247,79 +248,18 @@ class AmdGpuBackend(Backend):
         A delta can therefore establish that a limiter was active during this
         UI interval, but cannot honestly be normalised into a duty fraction.
         """
-        raw = fs.read_bytes(self.gpu_metrics)
-        if raw is None or len(raw) != GM3_SIZE:
+        decoded, cur = v3.decode(fs.read_bytes(self.gpu_metrics))
+        if cur is None:
             return
-        u16 = lambda off, n=1: struct.unpack_from(f"<{n}H", raw, off)
-        u32 = lambda off: struct.unpack_from("<I", raw, off)[0]
-
-        # SMU14 exports these in centi-Celsius (confirmed against amdgpu
-        # hwmon: 3538 here while temp1_input reported 35.0 C).
-        s["thm_gfx"] = self._valid(u16(4)[0], 100.0)
-        s["thm_soc"] = self._valid(u16(6)[0], 100.0)
-        temps = u16(8, 16)
-        for i, val in enumerate(temps):
-            if val not in (0, 0xFFFF):
-                s.setdefault(f"core_temp_{i}", val / 100.0)
-        skin = u16(40)[0]
-        if skin not in (0, 0xFFFF):
-            s["stt"] = skin / 100.0
-        gfx_busy, vcn_busy = u16(GM3_ACTIVITY_OFF, 2)
-        s["gpu_busy"] = self._valid(gfx_busy)
-        s["vcn_busy"] = self._valid(vcn_busy)
-        ipu_busy = u16(GM3_IPU_ACTIVITY_OFF, 8)
-        for i, val in enumerate(ipu_busy):
-            s[f"ipu_busy_{i}"] = self._valid(val)
-        valid_ipu = [x for x in ipu_busy if x != 0xFFFF]
-        if valid_ipu:
-            s["ipu_busy_mean"] = sum(valid_ipu) / len(valid_ipu)
-        c0 = u16(62, 16)
-        for i, val in enumerate(c0):
-            s.setdefault(f"core_c0_{i}", self._valid(val))
-        valid_c0 = [x for x in c0 if x != 0xFFFF]
-        if valid_c0:
-            s.setdefault("core_c0_mean", sum(valid_c0) / len(valid_c0))
-        # The ABI says MB/s; chart units are GiB/s.
-        s["dram_rd"] = self._valid(u16(GM3_DRAM_BW_OFF)[0], 1024.0)
-        s["dram_wr"] = self._valid(u16(GM3_DRAM_BW_OFF + 2)[0], 1024.0)
-        s["ipu_rd"] = self._valid(u16(GM3_IPU_BW_OFF)[0], 1024.0)
-        s["ipu_wr"] = self._valid(u16(GM3_IPU_BW_OFF + 2)[0], 1024.0)
-
-        # average_ipu_power is the lone u16 in this naturally aligned power
-        # block. Reading a u32 here consumed its 0xFFFF padding too and turned
-        # an unavailable zero into 4.29 million watts on Strix Halo.
-        s.setdefault("pwr_ipu", self._valid(u16(GM3_IPU_PWR_OFF)[0], 1000.0))
-        for key, off in (("pwr_socket", GM3_SOCKET_PWR_OFF),
-                         ("pwr_apu", GM3_APU_PWR_OFF),
-                         ("pwr_gfx", GM3_GFX_PWR_OFF),
-                         ("pwr_dgpu", GM3_DGPU_PWR_OFF),
-                         ("core_power_sum", GM3_ALL_CORE_PWR_OFF)):
-            s.setdefault(key, self._valid(u32(off), 1000.0))
-        for i, val in enumerate(u16(GM3_CORE_PWR_OFF, 16)):
-            s.setdefault(f"core_power_{i}", self._valid(val, 1000.0))
-        s["pwr_system"] = self._valid(u16(GM3_SYS_PWR_OFF)[0], 1000.0)
-        s.setdefault("stapm_lim", self._valid(
-            u16(GM3_STAPM_CURRENT_LIMIT_OFF)[0], 1000.0))
-        # A verified pm_table backend, when present, owns the STAPM reading.
-        # On Strix Halo that backend declines the undocumented layout, so the
-        # kernel-declared socket power is the closest honest value available.
-        s.setdefault("stapm", s.get("pwr_socket"))
-
-        clocks = u16(GM3_CLOCKS_OFF, 8)
-        for key, val in zip(("gfx_clk", "socclk", "vpeclk", "ipuclk",
-                             "fclk", "vclk", "uclk", "mpipuclk"), clocks):
-            s[key] = self._valid(val)
-        coreclks = u16(GM3_CORE_CLOCK_OFF, 16)
-        for i, val in enumerate(coreclks):
-            s.setdefault(f"core_freq_{i}", self._valid(val))
-        valid_clks = [x for x in coreclks if x != 0xFFFF]
-        if valid_clks:
-            s.setdefault("core_freq_mean", sum(valid_clks) / len(valid_clks))
-            s.setdefault("core_freq_max", max(valid_clks))
-        s["core_freq_limit"] = self._valid(u16(GM3_CORE_MAXFREQ_OFF)[0])
-        s["gfx_clk_max"] = self._valid(u16(GM3_GFX_MAXFREQ_OFF)[0])
-
-        cur = struct.unpack_from("<7I", raw, GM3_RESIDENCY_OFF)
+        fallback = ("core_temp_", "core_c0_", "core_power_", "core_freq_")
+        fallback_keys = {"pwr_ipu", "pwr_socket", "pwr_apu", "pwr_gfx",
+                         "pwr_dgpu", "core_power_sum", "stapm_lim", "stapm",
+                         "core_c0_mean", "core_freq_mean", "core_freq_max"}
+        for key, value in decoded.items():
+            if key in fallback_keys or key.startswith(fallback):
+                s.setdefault(key, value)
+            else:
+                s[key] = value
         if self._residency_prev is not None:
             delta = [(a - b) & 0xFFFFFFFF
                      for a, b in zip(cur, self._residency_prev)]
