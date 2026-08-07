@@ -94,10 +94,11 @@ said about it.
 ### ryzen_smu
 
 The pm_table is not exposed by any mainline driver. `ryzen_smu` is an
-out-of-tree DKMS module that maps it into sysfs:
+out-of-tree DKMS module that maps it into sysfs, with the amkillam fork having
+the most up to date SoC support at the time of writing:
 
 ```
-git clone https://github.com/kylon/ryzen_smu_amkillam
+git clone https://github.com/amkillam/ryzen_smu ryzen_smu_amkillam
 cd ryzen_smu_amkillam && sudo make dkms-install
 sudo modprobe ryzen_smu
 echo ryzen_smu | sudo tee /etc/modules-load.d/ryzen_smu.conf   # load at boot
