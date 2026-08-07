@@ -1,4 +1,4 @@
-"""Layer 2 -- the pane catalogue.
+"""Layer 3 -- the pane catalogue.
 
 What gets plotted, against which ceiling, with which caveat. Declarative on
 purpose: no Qt, no drawing, no sampling. Adding a pane means adding an entry

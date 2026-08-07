@@ -1,4 +1,4 @@
-"""Layer 5 -- assembly.
+"""Layer 6 -- assembly.
 
 Builds the pane column from the catalogue, owns the sample timer and the
 recorder, and wires the toolbar to the layers below. Everything here is

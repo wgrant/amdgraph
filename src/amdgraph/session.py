@@ -1,4 +1,4 @@
-"""Layer 2 -- recordings on disk.
+"""Layer 3 -- recordings on disk.
 
 The on-disk format, in both directions, plus the decision about which columns
 go into it. Kept out of the window so the format is readable without reading

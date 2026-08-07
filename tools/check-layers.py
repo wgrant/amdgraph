@@ -14,10 +14,8 @@ an earlier version looked only at relative ones and a plain
 works at runtime, since the launcher puts src/ on sys.path and the package is
 importable by its own absolute name from inside itself.
 
-Modules one directory down (backends/*) are supported too, named by their
-dotted path (`backends.host`). Deliberately one level only: a second level of
-nesting would need a recursive walker, which is not a problem this package
-has, and building one now would be solving something that doesn't exist.
+Subpackages are walked recursively and named by dotted path, so organizing a
+hardware ABI more deeply never creates an unenforced corner of the package.
 """
 
 import argparse
@@ -71,19 +69,16 @@ QT_ROOTS = ("PyQt6", "PyQt5", "PySide6")
 
 def discover(pkg):
     """dotted module name -> absolute file path, for every module in the
-    package: top-level `foo.py` as `"foo"`, and one directory down as
-    `"dirname.foo"`. Directories starting with `_` (i.e. `__pycache__`) are
-    skipped.
+    package. Directories starting with `_` (i.e. `__pycache__`) are skipped.
     """
     out = {}
-    for fn in sorted(os.listdir(pkg)):
-        full = os.path.join(pkg, fn)
-        if fn.endswith(".py") and fn != "__init__.py":
-            out[fn[:-3]] = full
-        elif os.path.isdir(full) and not fn.startswith("_"):
-            for sub in sorted(os.listdir(full)):
-                if sub.endswith(".py") and sub != "__init__.py":
-                    out[f"{fn}.{sub[:-3]}"] = os.path.join(full, sub)
+    for root, dirs, files in os.walk(pkg):
+        dirs[:] = sorted(d for d in dirs if not d.startswith("_"))
+        rel = os.path.relpath(root, pkg)
+        prefix = [] if rel == "." else rel.split(os.sep)
+        for fn in sorted(files):
+            if fn.endswith(".py") and fn != "__init__.py":
+                out[".".join(prefix + [fn[:-3]])] = os.path.join(root, fn)
     return out
 
 

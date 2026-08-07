@@ -14,9 +14,8 @@ import pytest
 def build(check_layers, tmp_path):
     """Write a minimal legal package, overlay `files`, and check it.
 
-    A dotted LAYER key (`backends.host`) gets a real subdirectory with its
-    own `__init__.py`, mirroring the one level of nesting the checker itself
-    supports -- a file literally named `backends.host.py` would not exercise
+    A dotted LAYER key gets real nested packages, mirroring recursive
+    discovery -- a file literally named `backends.host.py` would not exercise
     the same code path as the real package does.
     """
     def run(files):
@@ -43,6 +42,15 @@ def test_real_package_is_clean(check_layers, repo_root):
         os.path.join(repo_root, "src", "amdgraph"))
     assert problems == []
     assert listed == set(check_layers.LAYER)
+
+
+def test_discovery_is_recursive(check_layers, tmp_path):
+    pkg = tmp_path / "amdgraph"
+    nested = pkg / "gpu_metrics" / "v3"
+    nested.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    (nested / "decoder.py").write_text("")
+    assert "gpu_metrics.v3.decoder" in check_layers.discover(str(pkg))
 
 
 @pytest.mark.parametrize("mod, body, needles", [
