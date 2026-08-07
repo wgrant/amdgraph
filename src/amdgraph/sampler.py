@@ -10,12 +10,32 @@ May import: fields, sysfs, backends.
 
 from .backends import amdgpu, host, platform, zen_smu
 from .model import Sample
+from .normalize import normalize
 from .sysfs import RealFS
 
 # Order matters only for notes(): it decides which "why is this empty"
 # string comes first in the status bar. Kept as SMU-then-GPU, matching what
 # this program has always shown.
 _PROBES = (host.probe, platform.probe, zen_smu.probe, amdgpu.probe)
+
+# Deliberate overlap between the source-derived PM table and the kernel's
+# generic gpu_metrics fallback. The PM table wins for these; later backends
+# replace earlier values for every other collision, preserving historical
+# behavior while making it testable rather than an accident of setdefault().
+_PM_FIRST = {
+    "pwr_ipu", "pwr_socket", "pwr_apu", "pwr_gfx", "pwr_dgpu",
+    "core_power_sum", "stapm_lim", "stapm", "core_c0_mean",
+    "core_freq_mean", "core_freq_max",
+}
+_PM_FIRST_PREFIXES = ("core_temp_", "core_c0_", "core_power_", "core_freq_")
+
+
+def merge_sample(target, contribution):
+    """Merge one isolated backend result under the declared priority rules."""
+    for key, value in contribution.items():
+        preserve = key in _PM_FIRST or key.startswith(_PM_FIRST_PREFIXES)
+        if not (preserve and key in target):
+            target[key] = value
 
 
 class Sampler:
@@ -59,8 +79,10 @@ class Sampler:
     def sample(self):
         s: Sample = {}
         for b in self.backends:
-            b.sample(s, self.fs)
-        return s
+            local = {key: s[key] for key in b.REQUIRES if key in s}
+            b.sample(local, self.fs)
+            merge_sample(s, local)
+        return normalize(s)
 
     def metric_keys(self):
         """Supported telemetry, whether or not the current read succeeded."""

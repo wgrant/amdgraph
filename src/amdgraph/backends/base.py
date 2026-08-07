@@ -48,6 +48,7 @@ class Backend:
         """Change how often a high-rate background poller runs, if this
         backend has one."""
     METRIC_KEYS: Tuple[str, ...] = ()
+    REQUIRES: Tuple[str, ...] = ()
 
     def metrics(self):
         """Telemetry this backend supports, independent of the latest read."""

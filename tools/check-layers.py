@@ -33,7 +33,7 @@ LAYER = {
     "smu.strix_halo": 0, "smu.strix_point": 0, "smu.pm_tables": 0,
     "backends.base": 1, "backends.host": 1, "backends.platform": 1,
     "backends.zen_smu": 1, "backends.amdgpu": 1,
-    "sampler": 2, "store": 2,
+    "normalize": 2, "sampler": 2, "store": 2,
     "palette": 3, "panes": 3, "session": 3, "view": 3,
     "render": 4,
     "timepane": 5, "frame": 5, "chart": 5, "rasters": 5, "axis": 5,
@@ -54,6 +54,7 @@ ALLOWED_SAME_LAYER = {
     ("backends.platform", "backends.base"),
     ("backends.zen_smu", "backends.base"),
     ("backends.amdgpu", "backends.base"),
+    ("sampler", "normalize"),
     ("chart", "timepane"),
     ("rasters", "timepane"),
     # frame supplies the widget chrome the painted bodies sit inside; like

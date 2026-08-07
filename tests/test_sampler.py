@@ -16,11 +16,16 @@ from amdgraph import fields
 from amdgraph.backends import amdgpu, host, zen_smu
 from amdgraph.smu import pm_tables
 from amdgraph.smu.pm_tables import PHOENIX_VERSION
-from amdgraph.sampler import Sampler
+from amdgraph.sampler import Sampler, merge_sample
 from amdgraph.sysfs import HWMON, ReplayFS
 
 
 class TestComposition:
+    def test_merge_policy_preserves_pm_fallbacks_but_replaces_direct_fields(self):
+        sample = {"core_freq_0": 4100.0, "thm_gfx": 50.0}
+        merge_sample(sample, {"core_freq_0": 3900.0, "thm_gfx": 51.0})
+        assert sample == {"core_freq_0": 4100.0, "thm_gfx": 51.0}
+
     def test_host_backend_always_present(self):
         s = Sampler(fs=ReplayFS({}))
         try:

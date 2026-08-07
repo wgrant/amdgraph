@@ -11,6 +11,7 @@ from conftest import pm_blob
 from amdgraph import fields
 from amdgraph.backends import zen_smu
 from amdgraph.fields import MAX_CORE_SLOTS
+from amdgraph.normalize import normalize
 from amdgraph.smu.pm_tables import (PHOENIX_VERSION, PROFILES,
                                    STRIX_HALO_VERSION, STRIX_POINT_VERSIONS)
 from amdgraph.sysfs import MemoryFS, RealFS
@@ -27,7 +28,8 @@ class TestPmDecode:
             monkeypatch.setattr(zen_smu, "TABLE", str(p))
             out = {}
             backend.sample(out, RealFS())
-            return out
+            out.setdefault("core_count", float(backend.ncores))
+            return normalize(out)
         return run
 
     def test_scalars_and_scaling(self, decode):
@@ -51,6 +53,7 @@ class TestPmDecode:
                         for i in range(MAX_CORE_SLOTS)})
         s = {"core_count": 6.0}
         zen_smu.ZenSmuBackend().sample(s, MemoryFS(data={zen_smu.TABLE: blob}))
+        normalize(s)
         assert s["core_power_mean"] == pytest.approx(3.5)
         assert s["core_power_sum"] == pytest.approx(21.0)
         assert "core_power_6" not in s
@@ -78,6 +81,8 @@ class TestPmDecode:
         monkeypatch.setattr(zen_smu, "TABLE", str(p))
         s = {}
         zen_smu.ZenSmuBackend(STRIX_HALO_VERSION).sample(s, RealFS())
+        s["core_count"] = 16.0
+        normalize(s)
         assert s["stapm"] == 42.0
         assert s["ppt_fast_lim"] == 115.0
         assert s["tctl"] == 75.0
@@ -106,6 +111,8 @@ class TestPmDecode:
         monkeypatch.setattr(zen_smu, "TABLE", str(p))
         s = {}
         zen_smu.ZenSmuBackend(STRIX_POINT_VERSIONS[0]).sample(s, RealFS())
+        s["core_count"] = 12.0
+        normalize(s)
         assert s["stapm"] == 30.0 and s["tdc_lim"] == 70.0
         assert s["tctl"] == 65.0 and s["tctl_lim"] == 100.0
         assert s["thm_gfx"] == 48.0 and s["thm_soc"] == 46.0
