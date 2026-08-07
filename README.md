@@ -254,12 +254,12 @@ elsewhere. The wire format and compatibility rules are in
 
 ### The source protocol
 
-`Main` takes a `source=` and uses exactly six methods of it — `sample()`,
-`notes()`, `meta()`, `set_cap_rate()`, `reset()`, `close()`. `Sampler` is the
-one that reads this machine; the tests pass a fake, which is why the window has
-coverage at all. Anything specific to how a *particular* part is read belongs
-behind those six methods, so a Renoir or Strix Halo backend is a new class
-rather than an edit to the window.
+Hardware readers implement `Source`; `Sampler` composes them. Frontends use the
+higher-level `HistoryService`, which owns a Source plus history, recording and
+markers. `LocalHistoryService` and `RemoteHistoryService` implement the same
+contract, so selecting the daemon changes no Qt or Rich presentation code.
+Anything specific to a part remains behind Source/backend interfaces, while
+anything specific to persistence or transport remains behind HistoryService.
 
 Coverage, for orientation rather than as a target:
 
