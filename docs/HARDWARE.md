@@ -184,10 +184,14 @@ SoC.
 5. **Make the pane catalogue conditional.** `PANES` is currently unconditional;
    it needs to drop series whose key never appears and panes left empty.
 
-### Target machines on hand
+### Porting roadmap
 
-Phoenix (ThinkPad X13 G4) · Phoenix (Framework 13) · Renoir · Aerith · Sephiroth
-· Granite Ridge · Strix Halo.
+Parts available for validation, in the order they are worth doing — Framework
+first because it isolates the platform axis, then the newer silicon where
+`gpu_metrics` does more of the work for us:
+
+Phoenix (Framework 13) · Renoir · Strix Halo · Aerith · Sephiroth ·
+Granite Ridge.
 
 **Granite Ridge is arguably a different tool.** No STT, no skin governor, no
 unified APU power budget — the panes that make this useful have no analogue. It

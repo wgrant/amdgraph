@@ -26,7 +26,7 @@ def main():
     from . import HELP
 
     ap = argparse.ArgumentParser(
-        description="Live strip charts for AMD Phoenix ThinkPads.",
+        description="Live strip charts for AMD Ryzen laptops.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=HELP)
     ap.add_argument("-i", "--interval", type=float, default=1.0,

@@ -9,6 +9,7 @@ import base64
 import json
 import os
 import struct
+import sys
 import time
 
 import pytest
@@ -114,19 +115,17 @@ class TestCapture:
         assert "drv_version" in text
 
 
+@pytest.mark.skipif(not hasattr(sys, "stdlib_module_names"),
+                    reason="sys.stdlib_module_names is 3.10+")
 def test_probe_needs_no_third_party_packages(probe, repo_root):
     """It has to run on a bare install with nothing but CPython."""
     import ast
-    src = open(os.path.join(repo_root, "tools", "amdgraph-probe")).read()
+    with open(os.path.join(repo_root, "tools", "amdgraph-probe")) as f:
+        src = f.read()
     roots = set()
     for n in ast.walk(ast.parse(src)):
         if isinstance(n, ast.Import):
             roots.update(a.name.split(".")[0] for a in n.names)
         elif isinstance(n, ast.ImportFrom) and n.module and not n.level:
             roots.add(n.module.split(".")[0])
-    assert not (roots - set(sys_stdlib()))
-
-
-def sys_stdlib():
-    import sys
-    return sys.stdlib_module_names
+    assert not (roots - set(sys.stdlib_module_names))

@@ -1,9 +1,9 @@
-"""amdgraph -- live strip charts for AMD Phoenix ThinkPads.
+"""amdgraph -- live strip charts for AMD Ryzen laptops.
 
-A GUI sibling to `amdmon`. Same premise: every number comes from sysfs, read
-directly, with no subprocesses and no root. That matters more than it sounds --
-a monitor that shells out to ryzenadj once a second becomes a top wakeup source
-and perturbs the very thermal behaviour you are trying to tune.
+Every number comes from sysfs, read directly, with no subprocesses and no root.
+That matters more than it sounds -- a monitor that shells out to ryzenadj once a
+second becomes a top wakeup source and perturbs the very thermal behaviour you
+are trying to tune.
 
 What it shows that off-the-shelf Linux monitors do not: the SMU's own view of
 itself. STAPM/PPT budgets against their limits, the STT skin-temperature model
@@ -26,6 +26,13 @@ Keys:  space freeze   r reset   m mark   Esc unzoom   [ ] window   q quit
 
 Requires PyQt6 and the ryzen_smu kernel module (SMU panes degrade to empty
 without it; hwmon and cpufreq panes still work).
+
+Sensor layouts are part-specific and undocumented, so amdgraph decodes only what
+has been checked against live silicon: pm_table 0x004C0009 and gpu_metrics v2_1,
+as found on Ryzen 7040-series (Phoenix). On anything else the affected panes stay
+empty and the status bar names the version it found, rather than showing numbers
+read from the wrong offsets. See docs/HARDWARE.md for what adding a part
+involves.
 
 
 Layers

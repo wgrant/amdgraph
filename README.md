@@ -13,6 +13,12 @@ Sessions record to CSV and reload, either alone or as a ghost behind the live
 trace — so "did that `ryzenadj` change actually help" has an answer rather than
 an impression.
 
+> **Verified on Ryzen 7040-series (Phoenix) only.** Sensor layouts are
+> part-specific and undocumented, so amdgraph decodes just the one it has
+> checked against live silicon, and leaves the affected panes empty on anything
+> else rather than showing numbers read from the wrong offsets. Adding a part is
+> a documented procedure — see [`docs/HARDWARE.md`](docs/HARDWARE.md).
+
 ```
 ./amdgraph [-i SECONDS] [--open FILE]
 ```
