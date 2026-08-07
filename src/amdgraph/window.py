@@ -74,7 +74,9 @@ class Main(QMainWindow):
         detected_cores = initial.get("core_count")
         self.core_count = (N_CORES if detected_cores is None else
                            max(1, min(N_CORES, int(detected_cores))))
-        self.catalogue, self.catalogue_groups = available_catalogue(initial)
+        capabilities = (self.sampler.metric_keys()
+                        if hasattr(self.sampler, "metric_keys") else initial)
+        self.catalogue, self.catalogue_groups = available_catalogue(capabilities)
         self.store.append(time.monotonic() - self.t_start, initial)
 
         # Size the shared gutters to the text that actually has to fit, before
@@ -425,7 +427,9 @@ class Main(QMainWindow):
                     "interval": f"{self.interval:g}",
                     **self.sampler.meta(),
                 }
-                self.recorder = Recorder(path, record_keys(), meta)
+                keys = (self.sampler.metric_keys()
+                        if hasattr(self.sampler, "metric_keys") else record_keys())
+                self.recorder = Recorder(path, keys, meta)
             except OSError as e:
                 QMessageBox.warning(self, "amdgraph",
                                     f"Cannot record: {e}")

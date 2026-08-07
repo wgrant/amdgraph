@@ -160,6 +160,25 @@ class ThrottleSampler:
 
 
 class AmdGpuBackend(Backend):
+    COMMON_KEYS = ("gpu_busy", "sclk", "socclk", "gpu_edge", "sclk_hw",
+                   "gpu_power")
+    V2_KEYS = ("pwr_socket", "pwr_soc", "pwr_gfxslot", "pwr_cores",
+               "pwr_rest", "throttle_raw", "throttle_n")
+    V3_KEYS = (
+        "thm_gfx", "thm_soc", "stt", "vcn_busy", "ipu_busy_mean",
+        "core_c0_mean", "dram_rd", "dram_wr", "ipu_rd", "ipu_wr",
+        "pwr_ipu", "pwr_socket", "pwr_apu", "pwr_gfx", "pwr_dgpu",
+        "core_power_sum", "pwr_system", "stapm_lim", "stapm", "gfx_clk",
+        "socclk", "vpeclk", "ipuclk", "fclk", "vclk", "uclk", "mpipuclk",
+        "core_freq_mean", "core_freq_max", "core_freq_limit", "gfx_clk_max")
+    ALL_METRIC_KEYS = tuple(dict.fromkeys(
+        COMMON_KEYS + V2_KEYS + V3_KEYS
+        + tuple(f"thr{bit}" for bit, _name, _family in THROTTLE_BITS)
+        + tuple(f"{base}_{i}" for base in
+                ("core_temp", "core_c0", "core_power", "core_freq")
+                for i in range(16))
+        + tuple(f"ipu_busy_{i}" for i in range(8))))
+
     def __init__(self, card, gpu_metrics, gm_ok, gm_note, fs):
         self.card = card
         self.gpu_metrics = gpu_metrics
@@ -181,6 +200,18 @@ class AmdGpuBackend(Backend):
         self.throttle = ThrottleSampler(poll_path, fs)
         self._residency_prev = None
         self.throttle.start()
+
+    def metrics(self):
+        from ..model import Metric
+        keys = list(self.COMMON_KEYS)
+        keys += list(self.V3_KEYS if self.gm_version == GM3_VERSION
+                     else self.V2_KEYS)
+        keys += [f"thr{bit}" for bit, _name, _family in THROTTLE_BITS]
+        if self.gm_version == GM3_VERSION:
+            for base in ("core_temp", "core_c0", "core_power", "core_freq"):
+                keys += [f"{base}_{i}" for i in range(16)]
+            keys += [f"ipu_busy_{i}" for i in range(8)]
+        return tuple(Metric(key) for key in dict.fromkeys(keys))
 
     def notes(self):
         return [self.gm_note] if self.gm_note else []

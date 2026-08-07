@@ -68,6 +68,9 @@ class HostBackend(Backend):
     """
 
     SLOW_EVERY = 5
+    METRIC_KEYS = (
+        "core_count", "cpu_busy", "mem_used_pct", "swap_used_pct", "pprof",
+        "batt_charging", "ac_online", "nvme", "batt_power")
 
     def __init__(self, fs):
         self.hwmon = find_hwmon(fs=fs)

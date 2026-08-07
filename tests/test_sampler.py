@@ -28,6 +28,14 @@ class TestComposition:
         finally:
             s.close()
 
+    def test_metric_keys_do_not_depend_on_a_successful_sample(self):
+        s = Sampler(fs=ReplayFS({}))
+        try:
+            assert "cpu_busy" in s.metric_keys()
+            assert len(s.metric_keys()) == len(set(s.metric_keys()))
+        finally:
+            s.close()
+
     def test_meta_defaults_pm_table_version_when_unsupported(self):
         s = Sampler(fs=ReplayFS({}))
         try:

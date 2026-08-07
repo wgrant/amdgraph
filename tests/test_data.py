@@ -283,6 +283,8 @@ class TestSession:
 
     @pytest.mark.parametrize("key", [
         "stapm", "stapm_lim", "core_power_sum", "pwr_socket", "pwr_soc",
+        "pwr_apu", "pwr_gfx", "pwr_ipu", "pwr_dgpu", "pwr_system",
+        "ipu_busy_mean", "ipu_rd", "vpeclk", "mpipuclk",
         "thr0", "thr12", "ec_skin", "lapmode", "palm"])
     def test_record_keys_cover_the_plotted_ones(self, key):
         assert key in record_keys()

@@ -15,6 +15,8 @@ from .base import Backend
 
 
 class ThinkpadBackend(Backend):
+    METRIC_KEYS = ("ec_skin", "ec_cpu", "palm", "lapmode", "fan1", "fan2",
+                   "fan_cmd")
     def __init__(self, tp):
         self.tp = tp
 
@@ -50,6 +52,9 @@ class CrosEcBackend(Backend):
     that declaration order.  Unlike thinkpad_acpi there is no exposed
     fan-command mode, only achieved RPM (and a target for fan 1).
     """
+
+    METRIC_KEYS = ("ec_power", "ec_memory", "ec_ambient", "ec_cpu",
+                   "ec_cpu_virtual", "fan1", "fan2", "fan3")
 
     def __init__(self, ec):
         self.ec = ec

@@ -61,6 +61,11 @@ class Sampler:
             b.sample(s, self.fs)
         return s
 
+    def metric_keys(self):
+        """Supported telemetry, whether or not the current read succeeded."""
+        return tuple(dict.fromkeys(metric.key for backend in self.backends
+                                   for metric in backend.metrics()))
+
     # -- the source protocol ----------------------------------------------
 
     def notes(self):

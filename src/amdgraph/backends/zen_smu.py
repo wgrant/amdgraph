@@ -22,6 +22,22 @@ class ZenSmuBackend(Backend):
         self.cores = self.layout.cores
         self.ncores = self.layout.core_slots
 
+    def metrics(self):
+        from ..model import Metric, MetricKind
+        keys = list(self.scalars)
+        for base in self.cores:
+            keys.extend(f"{base}_{i}" for i in range(self.ncores))
+            keys.extend((f"{base}_mean", f"{base}_max"))
+        keys.extend(("core_power_sum", "stapm_head", "ppt_slow_head",
+                     "ppt_fast_head"))
+        if self.layout.thermal_clusters:
+            keys.extend(("tctl", "tctl_lim"))
+        return tuple(Metric(key, kind=(MetricKind.PER_CORE
+                                      if any(key.startswith(f"{base}_")
+                                             for base in self.cores)
+                                      else MetricKind.SCALAR))
+                     for key in dict.fromkeys(keys))
+
     def sample(self, s, fs):
         raw = fs.read_bytes(TABLE)
         if raw is None:

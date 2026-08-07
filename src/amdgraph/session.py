@@ -12,7 +12,10 @@ import os
 
 import numpy as np
 
-from .fields import N_CORES, THROTTLE_BITS
+from .backends.amdgpu import AmdGpuBackend
+from .backends.host import HostBackend
+from .backends.platform import CrosEcBackend, ThinkpadBackend
+from .backends.zen_smu import ZenSmuBackend
 from .smu.pm_tables import PROFILES
 from .store import Store
 
@@ -25,22 +28,12 @@ def record_keys():
     """Record every key the sampler can produce, not just the plotted ones --
     a recording you have to re-take because you did not log the column you now
     want is worse than a slightly larger file."""
-    keys, core_bases = [], []
-    for layout in PROFILES.values():
-        keys += list(layout.scalars)
-        core_bases += list(layout.cores)
-    for base in dict.fromkeys(core_bases):
-        keys += [f"{base}_{i}" for i in range(N_CORES)]
-        keys += [f"{base}_mean", f"{base}_max"]
-    keys += ["core_count", "throttle_raw", "throttle_n", "pwr_socket",
-             "pwr_cores", "pwr_soc", "pwr_gfxslot", "pwr_rest"]
-    keys += [f"thr{b}" for b, _n, _f in THROTTLE_BITS]
-    keys += ["stapm_head", "ppt_slow_head", "ppt_fast_head",
-             "core_power_sum", "cpu_busy", "gpu_busy", "sclk", "sclk_hw",
-             "socclk", "gpu_edge", "gpu_power", "ec_skin", "ec_cpu",
-             "ec_cpu_virtual", "ec_power", "ec_memory", "ec_ambient",
-             "fan1", "fan2", "fan3", "fan_cmd", "nvme", "batt_power",
-             "pprof", "ac_online", "batt_charging", "lapmode", "palm"]
+    keys = list(HostBackend.METRIC_KEYS)
+    keys += list(ThinkpadBackend.METRIC_KEYS + CrosEcBackend.METRIC_KEYS)
+    keys += list(AmdGpuBackend.ALL_METRIC_KEYS)
+    for version in PROFILES:
+        keys += [metric.key for metric in ZenSmuBackend(version).metrics()
+                 if metric.record]
     seen, out = set(), []
     for k in keys:
         if k not in seen:
