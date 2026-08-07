@@ -11,7 +11,8 @@ import pytest
 
 pytest.importorskip("PyQt6.QtWidgets")
 
-from amdgraph.panes import CAP_RATES, HEAT_AFTER, PANES        # noqa: E402
+from amdgraph.panes import (CAP_RATES, GROUPS, HEAT_AFTER,     # noqa: E402
+                            PANES)
 from amdgraph.rasters import CorePane, ThrottlePane            # noqa: E402
 from amdgraph.session import load_session                      # noqa: E402
 from amdgraph.view import View                                 # noqa: E402
@@ -43,6 +44,67 @@ class TestAssembly:
         bar = main.centralWidget().layout().itemAt(0).widget()
         for w in bar.findChildren(QWidget):
             assert w.focusPolicy() == Qt.FocusPolicy.NoFocus
+
+
+class TestSections:
+    """A collapsed group hides panes; it must not stop them existing. They keep
+    getting data, so expanding one shows the history you did not watch being
+    recorded rather than an empty pane that starts from now."""
+
+    def members(self, main, group):
+        return [p for p in main.panes
+                if getattr(p, "spec", None) and p.spec.title in group.titles]
+
+    def test_declared_groups_get_a_header(self, main):
+        assert len(main.sections) == len(GROUPS)
+        assert [s.group.title for s in main.sections] == [g.title
+                                                          for g in GROUPS]
+
+    def test_collapsed_by_default_hides_its_panes(self, main):
+        for section in main.sections:
+            if section.group.collapsed:
+                assert not section.expanded
+                assert all(p.isHidden() for p in
+                           self.members(main, section.group))
+
+    def test_toggling_the_header_shows_and_hides(self, main):
+        section = main.sections[0]
+        members = self.members(main, section.group)
+        assert members
+        section.set_expanded(True)
+        assert all(not p.isHidden() for p in members)
+        section.set_expanded(False)
+        assert all(p.isHidden() for p in members)
+
+    def test_hidden_panes_still_receive_samples(self, main):
+        section = main.sections[0]
+        for _ in range(5):
+            main.tick()
+        section.set_expanded(True)
+        # The panes read the shared store, so there is nothing per-pane to
+        # catch up: the history is simply there.
+        assert main.store.n == 6
+        assert all(p.view is main.view for p in self.members(main,
+                                                             section.group))
+
+    def test_a_collapsed_group_leaves_the_column_shorter(self, main):
+        section = main.sections[0]
+        section.set_expanded(False)
+        short = sum(p.minimumHeight() for p in main.panes if not p.isHidden())
+        section.set_expanded(True)
+        tall = sum(p.minimumHeight() for p in main.panes if not p.isHidden())
+        assert tall > short
+
+    def test_refresh_and_render_work_either_way(self, main):
+        from PyQt6.QtGui import QImage
+        for expanded in (False, True, False):
+            main.sections[0].set_expanded(expanded)
+            main.tick()
+            main.refresh()
+            img = QImage(700, 900, QImage.Format.Format_ARGB32)
+            img.fill(0)
+            main.resize(700, 900)
+            main.render(img)
 
 
 class TestSampling:

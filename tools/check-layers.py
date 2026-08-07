@@ -35,7 +35,7 @@ LAYER = {
     "sampler": 2, "store": 2,
     "palette": 3, "panes": 3, "session": 3, "view": 3,
     "render": 4,
-    "timepane": 5, "chart": 5, "rasters": 5, "axis": 5,
+    "timepane": 5, "chart": 5, "rasters": 5, "axis": 5, "section": 5,
     "window": 6, "__main__": 6,
 }
 

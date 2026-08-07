@@ -10,6 +10,7 @@ import pytest
 
 from amdgraph.render import (column_hold, fmt_time, fmt_val, nice_range,
                              polylines, time_ticks)
+from amdgraph.panes import GROUPS, HEAT_AFTER, PANES
 from amdgraph.session import Recorder, load_session, record_keys
 from amdgraph.store import Store
 from amdgraph.view import View
@@ -20,6 +21,49 @@ def ramp(n=100, step=1.0):
     for i in range(n):
         st.append(i * step, {"a": float(i)})
     return st
+
+
+class TestCatalogue:
+    """Invariants of panes.py itself. Pure data, no Qt."""
+
+    def test_group_members_exist(self):
+        titles = [s.title for s in PANES]
+        for g in GROUPS:
+            for t in g.titles:
+                assert t in titles, f"{g.title} names a pane that is not there"
+
+    def test_group_members_are_consecutive(self):
+        """The column is built by walking PANES and opening a section when its
+        first member comes up, so a group split across the catalogue would
+        silently swallow whatever sat in the gap."""
+        titles = [s.title for s in PANES]
+        for g in GROUPS:
+            at = [titles.index(t) for t in g.titles]
+            assert at == list(range(at[0], at[0] + len(at))), \
+                f"{g.title} is not a consecutive run of PANES"
+
+    def test_groups_do_not_overlap(self):
+        seen = set()
+        for g in GROUPS:
+            assert not (seen & set(g.titles))
+            seen |= set(g.titles)
+
+    def test_the_panes_that_answer_the_question_stay_top_level(self):
+        """Package power carries most of the governing limits -- STAPM and both
+        PPT budgets against their own moving ceilings -- so it is the second
+        thing to look at after the cap reason, not detail to be folded away."""
+        grouped = {t for g in GROUPS for t in g.titles}
+        assert "Package power" not in grouped
+        assert "SMU temperature" not in grouped
+        assert "CPU clock" not in grouped
+
+    def test_the_heat_strip_anchor_is_not_inside_a_group(self):
+        # It would end up hidden along with its anchor's section.
+        assert HEAT_AFTER not in {t for g in GROUPS for t in g.titles}
+
+    def test_titles_are_unique(self):
+        titles = [s.title for s in PANES]
+        assert len(titles) == len(set(titles))
 
 
 class TestStore:

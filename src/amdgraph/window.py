@@ -24,11 +24,12 @@ from .axis import TimeAxis
 from .chart import ChartPane
 from .fields import N_CORES, THROTTLE_BITS
 from .palette import INK, MUTED, SURFACE
-from .panes import (HEAT_AFTER, HEAT_MODES, PANES,
+from .panes import (GROUPS, HEAT_AFTER, HEAT_MODES, PANES,
                     THROTTLE_FIRST)
 from .rasters import CorePane, ThrottlePane
 from .render import fmt_time
 from .sampler import Sampler
+from .section import SectionHeader
 from .session import DATA_DIR, Recorder, load_session, record_keys
 from .store import Store
 from .view import View
@@ -93,8 +94,27 @@ class Main(QMainWindow):
             self.throttle = ThrottlePane(self.view)
             self.throttle.capRateChanged.connect(self.on_cap_rate)
             self._add_pane(self.throttle)
+        # Groups are declared by the run of titles they wrap, so the column is
+        # built by walking PANES in order and opening a section when its first
+        # member comes up.
+        self.sections = []
+        opens = {g.titles[0]: g for g in GROUPS}
+        grouped = {t for g in GROUPS for t in g.titles}
+        header, members = None, []
         for spec in PANES:
-            self._add_pane(ChartPane(spec, self.view))
+            if spec.title in opens:
+                group = opens[spec.title]
+                header = SectionHeader(group)
+                self.col.addWidget(header)
+                self.sections.append(header)
+                members = []
+                header.toggled.connect(
+                    lambda on, m=members: self._set_section(m, on))
+            pane = ChartPane(spec, self.view)
+            self._add_pane(pane)
+            if spec.title in grouped:
+                members.append(pane)
+                pane.setVisible(header.expanded)
             if spec.title == HEAT_AFTER:
                 self.heat = CorePane(self.view)
                 self._add_pane(self.heat)
@@ -137,6 +157,11 @@ class Main(QMainWindow):
             self.open_session(open_path)
 
     # -- chrome -----------------------------------------------------------
+
+    @staticmethod
+    def _set_section(members, on):
+        for pane in members:
+            pane.setVisible(on)
 
     def _add_pane(self, pane):
         """Every pane is wired the same way; the base class is what makes that

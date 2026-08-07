@@ -20,6 +20,25 @@ class Series:
         self.hit = None
 
 
+class PaneGroup:
+    """A consecutive run of panes behind one collapsible header.
+
+    Declared by title rather than by nesting the specs, so PANES stays a flat
+    catalogue you can read top to bottom in the order it appears on screen --
+    the same way HEAT_AFTER names its anchor.
+
+    The point is vertical budget. The column is about 2.4 screens tall, so
+    everything is a choice about what a reader sees before scrolling; a group
+    is for panes that are worth having but are not usually the question.
+    """
+
+    def __init__(self, title, titles, collapsed=True, note=None):
+        self.title = title
+        self.titles = tuple(titles)
+        self.collapsed = collapsed
+        self.note = note
+
+
 class PaneSpec:
     """One chart pane. Every series in a pane shares a single unit and a single
     y-axis -- there are no dual-scale panes here, because a second y-scale
@@ -121,6 +140,16 @@ PANES = [
         ("gpu_power", "amdgpu hwmon", None),
         ("batt_power", "battery", None),
     ], note="independent views: driver-reported APU power, and DC draw"),
+    # VID carries no limit line. Index 28 is a "VID limit" by the APU table
+    # convention, but on this part it jitters and the value at index 29
+    # routinely exceeds it -- whatever it is, it is not a ceiling this value
+    # respects, so drawing it as one would invent a constraint.
+    PaneSpec("Voltage", "V", [
+        ("vid", "VID", None),
+        ("core_volt_mean", "mean core", None),
+        ("vddcr_soc", "VDDCR_SOC", None),
+        ("cldo_vddp", "cLDO_VDDP", None),
+    ], floor0=False),
     PaneSpec("SMU temperature", "°C", [
         ("tctl", "Tctl", "tctl_lim"),
         ("stt", "STT skin", "stt_lim"),
@@ -160,16 +189,6 @@ PANES = [
         ("mem_used_pct", "memory used", None),
         ("swap_used_pct", "swap used", None),
     ]),
-    # VID carries no limit line. Index 28 is a "VID limit" by the APU table
-    # convention, but on this part it jitters and the value at index 29
-    # routinely exceeds it -- whatever it is, it is not a ceiling this value
-    # respects, so drawing it as one would invent a constraint.
-    PaneSpec("Voltage", "V", [
-        ("vid", "VID", None),
-        ("core_volt_mean", "mean core", None),
-        ("vddcr_soc", "VDDCR_SOC", None),
-        ("cldo_vddp", "cLDO_VDDP", None),
-    ], floor0=False),
     PaneSpec("DRAM bandwidth", "GiB/s", [
         ("dram_rd", "read", None),
         ("dram_wr", "write", None),
@@ -212,6 +231,21 @@ PANES = [
         ("ac_online", "AC", None),
     ], height=90,
         note="profile 0=low-power 1=balanced 2=performance; a step = budget change"),
+]
+
+# Collapsible sections, named by the run of pane titles they wrap.
+#
+# Package power stays outside: it carries most of the governing limits -- STAPM
+# and both PPT budgets against their own moving ceilings -- so it is the second
+# thing to look at after the cap reason, not detail. What is behind the header
+# is the breakdown you go to once you know power is the binding constraint, and
+# collapsing it lifts the temperatures, the CPU clock and the per-core strip
+# above the fold on a 900 px window.
+GROUPS = [
+    PaneGroup("Power detail",
+              ("VRM current", "Power breakdown", "Rail power", "Voltage"),
+              collapsed=True,
+              note="current, where the watts go, rails, voltage"),
 ]
 
 # Throttler poll rates. 1 Hz means "no background thread" and gives the old
