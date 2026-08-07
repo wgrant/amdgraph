@@ -32,7 +32,7 @@ def record_keys():
     for base in dict.fromkeys(core_bases):
         keys += [f"{base}_{i}" for i in range(N_CORES)]
         keys += [f"{base}_mean", f"{base}_max"]
-    keys += ["throttle_raw", "throttle_n", "pwr_socket",
+    keys += ["core_count", "throttle_raw", "throttle_n", "pwr_socket",
              "pwr_cores", "pwr_soc", "pwr_gfxslot", "pwr_rest"]
     keys += [f"thr{b}" for b, _n, _f in THROTTLE_BITS]
     keys += ["stapm_head", "ppt_slow_head", "ppt_fast_head",

@@ -11,11 +11,26 @@ from conftest import gm_blob
 from amdgraph.backends.amdgpu import check_gpu_metrics
 from amdgraph.sysfs import (RealFS, RecordingFS, ReplayFS, card_index,
                             dpm_current, find_drm_device, find_hwmon,
-                            read_num, read_text)
+                            physical_core_count, read_num, read_text)
 
 AMD, INTEL = "0x1002", "0x8086"
 V1_X = dict(fmt_rev=1, cont_rev=3, size=160)      # a discrete Radeon
 V3_0 = dict(fmt_rev=3, cont_rev=0, size=400)      # Strix Point / Strix Halo
+
+
+def test_physical_core_count_collapses_smt_siblings(tmp_path):
+    for cpu in range(12):
+        top = tmp_path / f"cpu{cpu}" / "topology"
+        top.mkdir(parents=True)
+        (top / "core_id").write_text(str(cpu // 2))
+        (top / "physical_package_id").write_text("0")
+        (top / "die_id").write_text("0")
+    assert physical_core_count(RealFS(), str(tmp_path)) == 6
+
+
+def test_physical_core_count_needs_topology(tmp_path):
+    (tmp_path / "cpu0").mkdir()
+    assert physical_core_count(RealFS(), str(tmp_path)) is None
 
 
 def decodable(dev):

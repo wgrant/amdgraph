@@ -34,8 +34,11 @@ class ZenSmuBackend(Backend):
         # and the mean are both worth having: the gap between them is how
         # unevenly the scheduler is spreading load, which changes what the
         # power budget buys you.
+        detected = s.get("core_count")
+        active_cores = (min(self.ncores, int(detected))
+                        if detected else self.ncores)
         for base_key, (base, scale) in self.cores.items():
-            vals = [v[base + i] * scale for i in range(self.ncores)
+            vals = [v[base + i] * scale for i in range(active_cores)
                     if base + i < n]
             if not vals:
                 continue
@@ -44,7 +47,7 @@ class ZenSmuBackend(Backend):
             s[f"{base_key}_mean"] = sum(vals) / len(vals)
             s[f"{base_key}_max"] = max(vals)
         if "core_power_mean" in s:
-            s["core_power_sum"] = s["core_power_mean"] * self.ncores
+            s["core_power_sum"] = s["core_power_mean"] * active_cores
 
         if self.version != PHOENIX_VERSION:
             # Strix Halo reports one thermal value per eight-core cluster. The

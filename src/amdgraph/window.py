@@ -71,6 +71,9 @@ class Main(QMainWindow):
         # unsupported sensor. It is also the one construction-time sample the
         # window has always taken; it merely moves before assembly.
         initial = self.sampler.sample()
+        detected_cores = initial.get("core_count")
+        self.core_count = (N_CORES if detected_cores is None else
+                           max(1, min(N_CORES, int(detected_cores))))
         self.catalogue, self.catalogue_groups = available_catalogue(initial)
         self.store.append(time.monotonic() - self.t_start, initial)
 
@@ -80,7 +83,7 @@ class Main(QMainWindow):
         render.calibrate(
             render.pane_font(),
             [n for _b, n, _f in THROTTLE_BITS]
-            + [f"core {i}" for i in range(N_CORES)],
+            + [f"core {i}" for i in range(self.core_count)],
             [s.label for spec in self.catalogue for s in spec.series])
 
         root = QWidget()
@@ -133,7 +136,8 @@ class Main(QMainWindow):
                 members.append(frame)
                 frame.setVisible(header.expanded)
             if spec.title == HEAT_AFTER:
-                hf = core_frame(self.view)
+                hf = core_frame(self.view, core_count=self.core_count)
+                self.heat_frame = hf
                 self.heat = hf.body
                 self._add_pane(hf)
         if self.panes:
@@ -502,6 +506,9 @@ class Main(QMainWindow):
         self.live = False
         self.session_path = path
         self.view.store = st          # self.store stays the live buffer
+        recorded_cores = st.latest("core_count")
+        if recorded_cores is not None:
+            self._set_core_count(recorded_cores)
         self.view.markers = list(st.markers)
         self.view.follow = True
         self.view.window = 0.0
@@ -515,6 +522,7 @@ class Main(QMainWindow):
         self.live = True
         self.session_path = None
         self.view.store = self.store
+        self._set_core_count(self.core_count)
         self.view.markers = []
         self.view.window = float(View.WINDOWS[1][0])
         self.cb_window.setCurrentIndex(1)
@@ -522,6 +530,14 @@ class Main(QMainWindow):
         self.btn_golive.hide()
         self.setWindowTitle("amdgraph")
         self.refresh()
+
+    def _set_core_count(self, core_count):
+        """Keep the per-core body and its fixed-height wrapper in sync."""
+        if not hasattr(self, "heat"):
+            return
+        self.heat.set_core_count(core_count)
+        self.heat_frame.setFixedHeight(
+            render.HEADER_H + self.heat.minimumHeight())
 
     def closeEvent(self, ev):
         # Qt can deliver this more than once -- an explicit close() followed by

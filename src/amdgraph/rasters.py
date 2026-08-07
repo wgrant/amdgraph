@@ -1,7 +1,7 @@
 """Layer 4 -- the two raster strip charts.
 
 Both answer a question that too many series would only obscure: which of
-thirteen throttler reasons fired, and how the load sat across eight cores.
+thirteen throttler reasons fired, and how load sat across the detected cores.
 Both paint a row-per-thing QImage the width of the plot rather than thousands
 of primitives, which is what keeps a full-window repaint cheap.
 
@@ -135,22 +135,29 @@ class ThrottlePane(TimePane):
 class CorePane(TimePane):
     """One row per physical core, colour = the selected metric.
 
-    Eight cores is past the point where categorical colours stay separable, so
+    Modern core counts are past where categorical colours stay separable, so
     this is a single-hue sequential encoding instead of eight lines: magnitude
     is the whole message, and identity comes from the row you are looking at.
     """
 
     ROW = 13
 
-    def __init__(self, view, parent=None):
+    def __init__(self, view, parent=None, core_count=N_CORES):
         super().__init__(view, parent)
+        self.core_count = max(1, min(N_CORES, int(core_count)))
         self.mode = 0
         self._buf = None
         fm = QFontMetrics(self.font())
         self.ROW = max(CorePane.ROW, fm.height())
         # Under the rows: the colour bar and its range, whichever is taller.
         self._bar_h = 5 + max(self.BAR_H, fm.height()) + 3
-        self.fix_height(render.TOP + N_CORES * self.ROW + self._bar_h)
+        self.fix_height(render.TOP + self.core_count * self.ROW + self._bar_h)
+
+    def set_core_count(self, core_count):
+        """Resize the raster when switching between hosts or recordings."""
+        self.core_count = max(1, min(N_CORES, int(core_count)))
+        self.fix_height(render.TOP + self.core_count * self.ROW + self._bar_h)
+        self.update()
 
     def set_mode(self, i):
         self.mode = i
@@ -160,7 +167,7 @@ class CorePane(TimePane):
         left = self.gutter_left()
         return QRectF(left, render.TOP,
                       max(10, self.width() - left - render.RIGHT),
-                      N_CORES * self.ROW)
+                      self.core_count * self.ROW)
 
     def paintEvent(self, _ev):
         p = QPainter(self)
@@ -171,7 +178,7 @@ class CorePane(TimePane):
         lo, hi = self._draw_image(p, r, self.view.store, base, dlo, dhi)
 
         store, t = self.view.store, self.view.cursor
-        for c in range(N_CORES):
+        for c in range(self.core_count):
             y = r.top() + c * self.ROW
             p.setPen(MUTED)
             p.drawText(QRectF(0, y, self.gutter_left() - 8, self.ROW),
@@ -199,7 +206,7 @@ class CorePane(TimePane):
 
     def _draw_image(self, p, r, store, base, dlo, dhi):
         w = max(1, int(r.width()))
-        img = np.zeros((N_CORES, w, 4), dtype=np.uint8)
+        img = np.zeros((self.core_count, w, 4), dtype=np.uint8)
         img[:, :, :] = (PANE_BG.blue(), PANE_BG.green(), PANE_BG.red(), 255)
 
         if store.n:
@@ -214,7 +221,7 @@ class CorePane(TimePane):
                 # collapse: a flat window would otherwise paint full-scale
                 # noise across every core.
                 vis = []
-                for c in range(N_CORES):
+                for c in range(self.core_count):
                     a = store.col(f"{base}_{c}")
                     if a is not None:
                         seg = a[i0:i1]
@@ -228,7 +235,7 @@ class CorePane(TimePane):
                         lo, hi = mid - half, mid + half
                 else:
                     lo, hi = dlo, dhi
-                for c in range(N_CORES):
+                for c in range(self.core_count):
                     a = store.col(f"{base}_{c}")
                     if a is None:
                         continue
@@ -346,7 +353,7 @@ def throttle_frame(view, indent=0):
     return frame
 
 
-def core_frame(view, indent=0):
+def core_frame(view, indent=0, core_count=N_CORES):
     """The per-core strip and the selector for what its colour means.
 
     The title is just "Per-core": the combo beside it names the metric and its
@@ -354,7 +361,7 @@ def core_frame(view, indent=0):
     in one row -- which is what the toolbar version was doing from across the
     window.
     """
-    body = CorePane(view)
+    body = CorePane(view, core_count=core_count)
     modes = _combo([f"{n} ({u})" for _k, n, u, _l, _h in HEAT_MODES], 0,
                    body.set_mode)
     frame = PaneFrame(body, "Per-core", controls=[modes],

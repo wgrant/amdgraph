@@ -204,7 +204,8 @@ clipping bugs came from constants tuned against one machine's font — see
 `CLAUDE.md`, which states the rule, and `DECISIONS.md` for the list.
 
 Two panes are rasters rather than line charts, because thirteen throttle reasons
-and eight cores are both far past where categorical colour stays separable. They
+and modern core counts are both far past where categorical colour stays
+separable. They
 paint a row-per-thing `QImage` the width of the plot, which keeps a full-window
 repaint cheap; identity comes from the row label and fixed order, and colour
 carries only magnitude (cores) or family (throttle reasons).

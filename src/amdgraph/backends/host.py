@@ -9,7 +9,7 @@ May import: fields, sysfs, backends.base.
 """
 
 from ..fields import PLATFORM_PROFILE, PROC_MEMINFO, PROC_STAT, PROFILES
-from ..sysfs import find_hwmon
+from ..sysfs import find_hwmon, physical_core_count
 from .base import Backend
 
 AC_ONLINE = "/sys/class/power_supply/AC/online"
@@ -71,6 +71,7 @@ class HostBackend(Backend):
 
     def __init__(self, fs):
         self.hwmon = find_hwmon(fs=fs)
+        self.core_count = physical_core_count(fs)
         self._cpu_prev = _cpu_stat(fs)
         self.tick = 0
         self.slow = {}
@@ -82,6 +83,8 @@ class HostBackend(Backend):
 
     def sample(self, s, fs):
         self.tick += 1
+        s["core_count"] = (None if self.core_count is None
+                           else float(self.core_count))
         cur = _cpu_stat(fs)
         if cur and self._cpu_prev:
             dt = cur[0] - self._cpu_prev[0]

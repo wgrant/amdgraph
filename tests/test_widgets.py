@@ -315,6 +315,13 @@ class TestHeaderLayout:
         assert body.width() - r.right() - 12 >= widest
         assert r.bottom() - r.top() == N_CORES * body.ROW
 
+    def test_per_core_raster_height_tracks_detected_count(self, view):
+        frame = core_frame(view, core_count=6)
+        body = frame.body
+        assert body.core_count == 6
+        assert body.plot_rect().height() == 6 * body.ROW
+        assert frame.height() == render.HEADER_H + body.minimumHeight()
+
     def test_a_readout_with_no_note_beside_it_takes_the_slack(self, view):
         """ThrottleReadout has no sizeHint, so a stretch spacer beside it left
         it pinned at its 160 px minimum and the active-reason list was cut

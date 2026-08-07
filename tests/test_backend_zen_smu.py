@@ -45,6 +45,18 @@ class TestPmDecode:
         assert s["core_power_0"] == pytest.approx(1.0)
         assert s["core_power_7"] == pytest.approx(8.0)
 
+    def test_detected_core_count_limits_slots_and_aggregates(
+            self, tmp_path, monkeypatch):
+        p = tmp_path / "pm_table"
+        p.write_bytes(pm_blob(
+            {513 + i: float(i + 1) for i in range(N_CORES)}))
+        monkeypatch.setattr(zen_smu, "TABLE", str(p))
+        s = {"core_count": 6.0}
+        zen_smu.ZenSmuBackend().sample(s, RealFS())
+        assert s["core_power_mean"] == pytest.approx(3.5)
+        assert s["core_power_sum"] == pytest.approx(21.0)
+        assert "core_power_6" not in s
+
     def test_headroom_is_limit_minus_value(self, decode):
         s = decode({0: 30.0, 1: 20.0, 4: 25.0, 5: 24.0})
         assert s["stapm_head"] == pytest.approx(10.0)

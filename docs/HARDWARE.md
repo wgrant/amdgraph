@@ -147,8 +147,12 @@ most code.
 
 ### 3. Core count and topology
 
-`N_CORES = 8` is hardcoded. Van Gogh has 4, Granite Ridge up to 16 across two
-CCDs, Strix Halo 16 (`v3_0` arrays are `[16]`).
+The GUI counts unique package/die/core tuples from Linux CPU topology, so SMT
+siblings collapse and the per-core raster follows the detected physical core
+count. PM-table decoding uses the lesser of that count and the selected
+table layout's slot count; `N_CORES = 16` remains only the largest ABI and
+recording allocation currently supported. Van Gogh has 4, Granite Ridge up to
+16 across two CCDs, and Strix Halo 16 (`v3_0` arrays are `[16]`).
 
 Worse, the per-core panes assume one flat set. The only reliable view of CCX
 boundaries from userspace is L3 sharing —

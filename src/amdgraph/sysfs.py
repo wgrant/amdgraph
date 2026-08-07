@@ -161,6 +161,30 @@ class ReplayFS(FS):
 
 
 HWMON = "/sys/class/hwmon"
+CPU_SYSFS = "/sys/devices/system/cpu"
+
+
+def physical_core_count(fs=None, base=CPU_SYSFS):
+    """Count detected physical cores from Linux topology, or return ``None``.
+
+    ``cpuN`` directories are logical CPUs.  The package/die/core tuple is the
+    stable identity that collapses SMT siblings without assuming Linux numbers
+    the first thread of every core before the second.  ``die_id`` is optional
+    on older kernels, where package+core remains the best available identity.
+    """
+    fs = fs or RealFS()
+    cores = set()
+    for name in fs.listdir(base):
+        if not (name.startswith("cpu") and name[3:].isdigit()):
+            continue
+        top = f"{base}/{name}/topology"
+        core = fs.read_num(f"{top}/core_id")
+        package = fs.read_num(f"{top}/physical_package_id")
+        if core is None or package is None:
+            continue
+        die = fs.read_num(f"{top}/die_id")
+        cores.add((int(package), None if die is None else int(die), int(core)))
+    return len(cores) or None
 
 
 def trailing_index(name):
