@@ -69,6 +69,28 @@ class RealFS(FS):
             return []
 
 
+class MemoryFS(FS):
+    """Small mapping-backed filesystem for decoder and discovery tests."""
+
+    def __init__(self, text=None, data=None, globs=None, listings=None):
+        self.text = dict(text or {})
+        self.data = dict(data or {})
+        self.globs = dict(globs or {})
+        self.listings = dict(listings or {})
+
+    def read_text(self, path):
+        return self.text.get(path)
+
+    def read_bytes(self, path):
+        return self.data.get(path)
+
+    def glob(self, pattern):
+        return list(self.globs.get(pattern, ()))
+
+    def listdir(self, path):
+        return list(self.listings.get(path, ()))
+
+
 class RecordingFS(FS):
     """Wraps another FS -- always a RealFS in practice -- and logs every
     call, in order, keyed by (op, path). Played back with ReplayFS to

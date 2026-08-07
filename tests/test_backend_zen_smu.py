@@ -13,7 +13,7 @@ from amdgraph.backends import zen_smu
 from amdgraph.fields import N_CORES
 from amdgraph.smu.pm_tables import (PHOENIX_VERSION, PROFILES,
                                    STRIX_HALO_VERSION, STRIX_POINT_VERSIONS)
-from amdgraph.sysfs import RealFS
+from amdgraph.sysfs import MemoryFS, RealFS
 
 
 class TestPmDecode:
@@ -46,13 +46,10 @@ class TestPmDecode:
         assert s["core_power_7"] == pytest.approx(8.0)
 
     def test_detected_core_count_limits_slots_and_aggregates(
-            self, tmp_path, monkeypatch):
-        p = tmp_path / "pm_table"
-        p.write_bytes(pm_blob(
-            {513 + i: float(i + 1) for i in range(N_CORES)}))
-        monkeypatch.setattr(zen_smu, "TABLE", str(p))
+            self):
+        blob = pm_blob({513 + i: float(i + 1) for i in range(N_CORES)})
         s = {"core_count": 6.0}
-        zen_smu.ZenSmuBackend().sample(s, RealFS())
+        zen_smu.ZenSmuBackend().sample(s, MemoryFS(data={zen_smu.TABLE: blob}))
         assert s["core_power_mean"] == pytest.approx(3.5)
         assert s["core_power_sum"] == pytest.approx(21.0)
         assert "core_power_6" not in s
