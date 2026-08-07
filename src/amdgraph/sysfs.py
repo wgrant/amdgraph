@@ -39,24 +39,47 @@ def find_hwmon():
     return out
 
 
-def find_drm_device(pattern, vendor, prefer):
-    """First matching DRM device dir, preferring one that has `prefer`.
+def card_index(dev):
+    """Sort key for a DRM device path: the card number, as a number.
+
+    Plain sorted() is lexicographic, which puts card10 before card2. Only the
+    fallback path below depends on the order, but a tie-break that reorders
+    itself once a machine reaches ten DRM nodes is not a tie-break.
+    """
+    name = os.path.basename(os.path.dirname(dev))
+    digits = "".join(c for c in name if c.isdigit())
+    return (int(digits) if digits else 1 << 30), dev
+
+
+def find_drm_device(pattern, vendor, validate):
+    """Pick the DRM device to read, preferring one `validate` accepts.
 
     Same discipline as find_hwmon: identify by what a node *is*, never by the
-    index it happened to get. The preference matters because a machine can
-    carry two AMD GPUs -- an APU and a discrete part -- and only the one whose
-    SMU publishes gpu_metrics can answer why the package is being held back.
-    Falls back to the first AMD device so the plain GPU sensors still work.
+    index it happened to get.
+
+    The preference has to be validation, not merely "publishes gpu_metrics".
+    An earlier version tested only for the file's presence, on the theory that
+    it would pick the APU on a machine that also has a discrete Radeon -- but
+    amdgpu exports gpu_metrics for discrete parts too, in the v1_x layouts, so
+    on exactly the machine that motivated the preference both candidates match
+    and the first one wins by accident. Asking whether the blob is one we can
+    actually decode is the question we meant to ask.
+
+    Falls back to any AMD device, so a part whose layout we do not decode still
+    gets its plain hwmon and DPM sensors. If several AMD devices are present
+    and none validates, the choice among them is arbitrary -- there is no
+    reliable way to tell an integrated GPU from a discrete one here -- and the
+    caller reports the layout as undecoded either way.
     """
-    found = None
-    for dev in sorted(glob.glob(pattern)):
+    fallback = None
+    for dev in sorted(glob.glob(pattern), key=card_index):
         if read_text(f"{dev}/vendor") != vendor:
             continue
-        if os.path.exists(f"{dev}/{prefer}"):
+        if validate(dev):
             return dev
-        if found is None:
-            found = dev
-    return found
+        if fallback is None:
+            fallback = dev
+    return fallback
 
 
 def dpm_current(path):

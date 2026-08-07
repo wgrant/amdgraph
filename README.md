@@ -56,8 +56,10 @@ Only one of these is out of tree, and it is the one that matters most.
 | `thinkpad_acpi` | yes | EC skin/CPU temperature, fans, palm sensor, lap mode |
 | `nvme` | yes | drive temperature |
 
-Missing modules degrade rather than crash: the affected panes read "no data",
-and the status bar says which source is absent and why.
+Missing modules degrade rather than crash — the affected panes read "no data".
+For the two SMU sources the status bar also names what is absent and why; a
+missing `thinkpad_acpi` or `nvme` just leaves those panes empty, with nothing
+said about it.
 
 ### ryzen_smu
 
@@ -86,7 +88,10 @@ $ od -An -tx4 /sys/kernel/ryzen_smu_drv/pm_table_version
  004c0009
 ```
 
-`tools/amdgraph-probe` prints both, decoded, along with everything else.
+`tools/amdgraph-probe` reports the version decoded, alongside `drv_version` and
+everything else. It records `codename` raw: the index is into `ryzen_smu`'s own
+enum, which differs between forks, and a stale table would turn an unknown part
+into a confidently mislabelled one.
 
 The driver publishes `pm_table` **world-readable** (`-r--r--r--`), which is what
 lets amdgraph run unprivileged. Nothing here writes to `smu_args`, `smn`, or any
@@ -158,8 +163,24 @@ map up through sampling, storage, drawing primitives and widgets to the window.
 Each module states what it is allowed to import, and that is enforced:
 
 ```
-python3 tools/check-layers.py
+tools/run-tests            # layering, unit tests, and the launcher's --help
 ```
+
+The tests are stdlib `unittest`, no pytest — the install story is "clone it and
+run it", and a suite that needs a package the program does not is a suite that
+goes unrun on the machine where something broke. Nothing touches real hardware;
+device discovery, the pm_table decode and the version guards all run against
+synthetic trees and blobs under a temp dir. Qt tests render offscreen and skip
+themselves if PyQt6 is absent.
+
+There are deliberately no golden pixel hashes. Pane rendering draws text, so a
+hash fingerprints the font stack as much as the code, and a golden file that
+breaks on a Qt upgrade gets deleted rather than investigated. What is asserted
+is what is portable: that every pane paints without raising, that the geometry
+contract holds, and that gestures produce exact view state — which is pure
+arithmetic. For an A/B check across a refactor, hash the renders in a scratch
+script against the previous commit; that is a refactoring aid, not a regression
+test.
 
 Two rules worth keeping. Panes are declared in `panes.py`, which contains no
 drawing code — if a decision about *what* to show has landed anywhere else, it

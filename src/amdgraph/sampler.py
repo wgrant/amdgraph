@@ -178,12 +178,19 @@ class Sampler:
         self.slow = {}
         self.pm_ok = False
         self.pm_note = ""
-        self.card = find_drm_device(DRM_DEVICES, AMD_VENDOR, "gpu_metrics")
+        self.card = find_drm_device(
+            DRM_DEVICES, AMD_VENDOR,
+            lambda dev: self._check_gpu_metrics(f"{dev}/gpu_metrics")[0])
         self.gpu_metrics = (f"{self.card}/gpu_metrics" if self.card else None)
         self.gm_ok, self.gm_note = self._check_gpu_metrics(self.gpu_metrics)
-        self.throttle = ThrottleSampler(self.gpu_metrics)
-        if self.gm_ok:
-            self.throttle.start()
+        # The poller is handed a path only when the layout checked out. Gating
+        # solely on the start() call below is not enough: changing the cap-poll
+        # rate in the toolbar calls set_rate(), which calls start() again, and
+        # a decode we already refused would come back to life at up to 50 Hz --
+        # burning ~1.2% of a core unpacking offsets that mean nothing on this
+        # part. Withholding the path is the one guard every caller goes through.
+        self.throttle = ThrottleSampler(self.gpu_metrics if self.gm_ok else None)
+        self.throttle.start()
         try:
             with open(PM_VERSION, "rb") as f:
                 ver = struct.unpack("<I", f.read(4))[0]

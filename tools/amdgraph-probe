@@ -44,11 +44,19 @@ SMU_DRV = "/sys/kernel/ryzen_smu_drv"
 
 
 def read_text(path):
+    """None when unreadable -- never a message.
+
+    This used to return "<No such file or directory>", which is truthy, and
+    topology() tests `if share:` before grouping CPUs by their L3 mask. On a
+    machine without cache/index3 every CPU therefore landed in one group keyed
+    by that string and ccx_count reported 1 -- a confident wrong answer for the
+    single field this probe exists to get right on multi-CCD parts.
+    """
     try:
         with open(path) as f:
             return f.read().strip()
-    except OSError as e:
-        return f"<{e.strerror}>" if e.errno else None
+    except OSError:
+        return None
 
 
 def read_bytes(path):
@@ -247,8 +255,13 @@ def smu_info():
         "pm_table_version": None,
         "pm_table_bytes": None,
         "pm_table_floats": None,
-        "codename": read_text(f"{SMU_DRV}/codename"),
-        "version": read_text(f"{SMU_DRV}/version"),
+        # codename is an index into ryzen_smu's own enum, and which enum that
+        # is depends on the fork and its version -- so it is recorded raw
+        # rather than decoded here, where a stale table would turn an unknown
+        # part into a confidently mislabelled one.
+        "codename_enum_index": read_text(f"{SMU_DRV}/codename"),
+        "drv_version": read_text(f"{SMU_DRV}/drv_version"),
+        "mp1_if_version": read_text(f"{SMU_DRV}/version"),
     }
     if ver and len(ver) >= 4:
         info["pm_table_version"] = f"{struct.unpack('<I', ver[:4])[0]:#010x}"
@@ -268,7 +281,9 @@ def capture(n, interval, card):
     gm_path = f"{card}/gpu_metrics" if card else None
     samples = []
     t0 = time.monotonic()
-    for _ in range(n):
+    for i in range(n):
+        if i:
+            time.sleep(interval)      # between samples, not after the last
         s = {"t": round(time.monotonic() - t0, 4)}
         pm = read_bytes(PM_TABLE)
         if pm:
@@ -286,7 +301,6 @@ def capture(n, interval, card):
                         for i in range(min(16, os.cpu_count() or 1))],
         }
         samples.append(s)
-        time.sleep(interval)
     return samples
 
 
