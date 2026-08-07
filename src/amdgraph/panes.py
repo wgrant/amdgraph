@@ -8,16 +8,43 @@ comment beside it rather than in a commit message nobody will find.
 May import: nothing in this package.
 """
 
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class SeriesSpec:
+    key: str
+    label: str
+    limit: str = None
+    good_high: bool = False
+
 
 class Series:
+    """Per-window state wrapped around an immutable catalogue entry."""
+
     def __init__(self, key, label, limit=None, good_high=False):
-        self.key, self.label, self.limit = key, label, limit
+        self.spec = SeriesSpec(key, label, limit, good_high)
         # good_high marks a series whose limit is a headroom ceiling rather
         # than a throttle point -- reaching it means nothing is holding the
         # part back, so it must not raise the CAPPED flag.
-        self.good_high = good_high
         self.visible = True
         self.hit = None
+
+    @property
+    def key(self):
+        return self.spec.key
+
+    @property
+    def label(self):
+        return self.spec.label
+
+    @property
+    def limit(self):
+        return self.spec.limit
+
+    @property
+    def good_high(self):
+        return self.spec.good_high
 
 
 class PaneGroup:
