@@ -9,6 +9,7 @@ May import: fields, sysfs, backends.
 """
 
 from .backends import amdgpu, host, platform, zen_smu
+from .model import Sample
 from .sysfs import RealFS
 
 # Order matters only for notes(): it decides which "why is this empty"
@@ -56,7 +57,7 @@ class Sampler:
                 self.backends.append(backend)
 
     def sample(self):
-        s = {}
+        s: Sample = {}
         for b in self.backends:
             b.sample(s, self.fs)
         return s

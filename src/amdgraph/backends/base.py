@@ -12,6 +12,8 @@ here knows `Sampler` exists.
 May import: fields, sysfs.
 """
 
+from typing import Tuple
+
 from ..model import Metric
 
 
@@ -45,7 +47,7 @@ class Backend:
     def set_cap_rate(self, hz):
         """Change how often a high-rate background poller runs, if this
         backend has one."""
-    METRIC_KEYS = ()
+    METRIC_KEYS: Tuple[str, ...] = ()
 
     def metrics(self):
         """Telemetry this backend supports, independent of the latest read."""

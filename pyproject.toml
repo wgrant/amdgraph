@@ -14,7 +14,10 @@ dependencies = ["numpy", "PyQt6"]
 amdgraph = "amdgraph.__main__:main"
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "mypy>=1.10,<2",
+    "pytest>=8",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -28,3 +31,16 @@ testpaths = ["tests"]
 addopts = "-q"
 # Widget tests force QT_QPA_PLATFORM=offscreen in conftest, so the suite never
 # tries to open a window and is safe to run over ssh or from a hook.
+
+[tool.mypy]
+python_version = "3.9"
+files = [
+    "src/amdgraph/model.py",
+    "src/amdgraph/smu",
+    "src/amdgraph/backends",
+    "src/amdgraph/sampler.py",
+]
+check_untyped_defs = true
+follow_imports = "skip"
+warn_redundant_casts = true
+warn_unused_ignores = true
