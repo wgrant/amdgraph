@@ -9,14 +9,15 @@ May import: fields, palette, panes, render, timepane.
 """
 
 import numpy as np
-from PyQt6.QtCore import QPointF, QRectF, Qt
+from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter
+from PyQt6.QtWidgets import QMenu
 
+from . import render
 from .fields import N_CORES, THROTTLE_BITS
 from .palette import (CRITICAL, INK, INK_DIM, LUT, MUTED, PANE_BG, RAMP,
                       SERIES, alpha)
-from .panes import HEAT_MODES
-from . import render
+from .panes import CAP_DEFAULT, CAP_RATES, HEAT_MODES
 from .render import TOP, column_hold, draw_markers, fmt_val, row_label_font
 from .timepane import TimePane
 
@@ -39,8 +40,14 @@ class ThrottlePane(TimePane):
     FAMILY = {"power": QColor(SERIES[0]), "thermal": QColor(SERIES[1]),
               "current": QColor(SERIES[2]), "prochot": CRITICAL}
 
+    # The poll rate lives here rather than in the toolbar: this is the only
+    # pane it affects, and the percentages in the header are meaningless
+    # without it, so it is printed alongside them and changed by right-click.
+    capRateChanged = pyqtSignal(float)
+
     def __init__(self, view, parent=None):
         super().__init__(view, parent)
+        self.cap_hz = CAP_RATES[CAP_DEFAULT][0]
         self.fix_height(TOP + len(THROTTLE_BITS) * self.ROW + 8)
         self._buf = None
         # Row labels get their own smaller font: "PROCHOT CPU" is the longest
@@ -81,6 +88,15 @@ class ThrottlePane(TimePane):
                    "Cap reason")
         p.setFont(self.font())
 
+        # The rate the duty cycles below are measured over. Without it a "62%"
+        # is uninterpretable, and it is also the affordance for changing it.
+        rate = f"{self.cap_hz:g} Hz"
+        p.setPen(MUTED)
+        rx = 6 + fm.horizontalAdvance("Cap reason") + 10
+        p.drawText(QRectF(rx, 2, fm.horizontalAdvance(rate) + 4, TOP - 4),
+                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                   rate)
+
         # Spell out what is active right now (or under the crosshair).
         t = self.view.cursor
         active = []
@@ -90,7 +106,7 @@ class ThrottlePane(TimePane):
             if v:
                 active.append((name, fam, v))
         active.sort(key=lambda a: -a[2])
-        x = 6 + fm.horizontalAdvance("Cap reason") + 16
+        x = rx + fm.horizontalAdvance(rate) + 14
         if not active:
             p.setPen(MUTED)
             p.drawText(QRectF(x, 2, 300, TOP - 4),
@@ -116,6 +132,29 @@ class ThrottlePane(TimePane):
         self.draw_cursor_rule(p, r)
         self.draw_selection(p, r)
         p.end()
+
+    def contextMenuEvent(self, ev):
+        """Right-click picks the poll rate.
+
+        The bits are instantaneous flags on a controller that duty-cycles at
+        roughly 20 Hz, so 1 Hz reports a coin flip rather than a duty cycle,
+        and 1 Hz also switches the background thread off entirely. Higher
+        costs more CPU -- about 1.2% of a core at 20 Hz.
+        """
+        menu = QMenu(self)
+        menu.addAction("Cap poll rate").setEnabled(False)
+        menu.addSeparator()
+        for hz, label in CAP_RATES:
+            act = menu.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(hz == self.cap_hz)
+            act.triggered.connect(lambda _c, v=hz: self._set_cap_rate(v))
+        menu.exec(ev.globalPos())
+
+    def _set_cap_rate(self, hz):
+        self.cap_hz = hz
+        self.capRateChanged.emit(hz)
+        self.update()
 
     def _draw_image(self, p, r, store):
         n = len(THROTTLE_BITS)

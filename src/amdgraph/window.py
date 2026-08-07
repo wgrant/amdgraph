@@ -24,7 +24,7 @@ from .axis import TimeAxis
 from .chart import ChartPane
 from .fields import N_CORES, THROTTLE_BITS
 from .palette import INK, MUTED, SURFACE
-from .panes import (CAP_DEFAULT, CAP_RATES, HEAT_AFTER, HEAT_MODES, PANES,
+from .panes import (HEAT_AFTER, HEAT_MODES, PANES,
                     THROTTLE_FIRST)
 from .rasters import CorePane, ThrottlePane
 from .render import fmt_time
@@ -91,6 +91,7 @@ class Main(QMainWindow):
         self.panes = []
         if THROTTLE_FIRST:
             self.throttle = ThrottlePane(self.view)
+            self.throttle.capRateChanged.connect(self.on_cap_rate)
             self._add_pane(self.throttle)
         for spec in PANES:
             self._add_pane(ChartPane(spec, self.view))
@@ -151,18 +152,14 @@ class Main(QMainWindow):
         h.setContentsMargins(8, 6, 8, 6)
         h.setSpacing(6)
 
-        self.btn_pause = QPushButton("Freeze")
-        self.btn_pause.setCheckable(True)
-        self.btn_pause.setToolTip(
-            "Hold the view still. Sampling and recording continue.")
-        self.btn_pause.toggled.connect(self.on_pause)
-        h.addWidget(self.btn_pause)
-
-        b = QPushButton("Reset")
-        b.setToolTip("Discard buffered history and start fresh")
-        b.clicked.connect(self.on_reset)
-        h.addWidget(b)
-
+        # Freeze, Reset and Follow used to have buttons here. Each duplicated a
+        # single-key shortcut, and between them they were 174 px of a toolbar
+        # that set the whole window's minimum width. Space is a guessable
+        # binding for pause, `r` for reset, and Follow was never really a
+        # control -- dragging or zooming turns it off by itself and the status
+        # bar already says "Esc to follow again" when it is off. Mark stays,
+        # because `m` is not guessable and the feature exists precisely for the
+        # things no sensor can see.
         self.btn_mark = QPushButton("Mark…")
         self.btn_mark.setToolTip(
             "Drop a labelled marker at the current time (key: m). For the "
@@ -180,33 +177,18 @@ class Main(QMainWindow):
         self.cb_window.currentIndexChanged.connect(self.on_window)
         h.addWidget(self.cb_window)
 
-        self.btn_live = QPushButton("Follow")
-        self.btn_live.setCheckable(True)
-        self.btn_live.setChecked(True)
-        self.btn_live.setToolTip(
-            "Pin the right edge to the newest sample. Drag on a chart to zoom "
-            "a range; wheel zooms; middle-drag pans.")
-        self.btn_live.toggled.connect(self.on_follow)
-        h.addWidget(self.btn_live)
-
-        h.addSpacing(10)
-        h.addWidget(QLabel("Cap poll"))
-        self.cb_cap = QComboBox()
-        for hz, lbl in CAP_RATES:
-            self.cb_cap.addItem(lbl)
-        self.cb_cap.setCurrentIndex(CAP_DEFAULT)
-        self.cb_cap.setToolTip(
-            "How often the throttler bitmask is sampled. The bits toggle at "
-            "roughly 20 Hz, so 1 Hz reports a coin flip rather than a duty "
-            "cycle. Higher costs more CPU: ~1.2% of a core at 20 Hz.")
-        self.cb_cap.currentIndexChanged.connect(self.on_cap_rate)
-        h.addWidget(self.cb_cap)
+        # Cap poll moved to a right-click on the Cap reason pane, which is the
+        # only thing it affects and where the rate is now printed -- the duty
+        # cycles in that header are meaningless without knowing it. It was a
+        # set-once expert control occupying 110 px of permanent chrome.
 
         h.addSpacing(10)
         h.addWidget(QLabel("Cores"))
         self.cb_heat = QComboBox()
-        for _, name, unit, _, _ in HEAT_MODES:
-            self.cb_heat.addItem(f"{name} ({unit})")
+        # No unit in the item text: the pane's own header already reads
+        # "Per-core clock  (MHz)", and repeating it cost 50 px of combo width.
+        for _, name, _unit, _, _ in HEAT_MODES:
+            self.cb_heat.addItem(name)
         self.cb_heat.currentIndexChanged.connect(
             lambda i: self.heat.set_mode(i))
         h.addWidget(self.cb_heat)
@@ -219,25 +201,26 @@ class Main(QMainWindow):
         self.btn_rec.toggled.connect(self.on_record)
         h.addWidget(self.btn_rec)
 
-        b = QPushButton("Overlay…")
-        b.setToolTip("Load a recording and draw it as a ghost behind the "
-                     "live trace, aligned by elapsed time")
-        b.clicked.connect(self.on_overlay)
-        h.addWidget(b)
-
-        self.btn_clear = QPushButton("Clear overlay")
-        self.btn_clear.clicked.connect(self.on_clear_overlay)
-        self.btn_clear.setEnabled(False)
-        h.addWidget(self.btn_clear)
+        # Load and clear are mutually exclusive -- there is never a moment when
+        # both apply -- so they are one button that says which one it is,
+        # rather than two with one of them greyed out.
+        self.btn_overlay = QPushButton("Overlay…")
+        self.btn_overlay.setToolTip(
+            "Load a recording and draw it as a ghost behind the live trace, "
+            "aligned by elapsed time")
+        self.btn_overlay.clicked.connect(self.on_overlay_button)
+        h.addWidget(self.btn_overlay)
 
         b = QPushButton("Open…")
         b.setToolTip("Stop sampling and browse a recorded session")
         b.clicked.connect(lambda: self.on_open())
         h.addWidget(b)
 
+        # Hidden while live: the action does not exist yet, and a permanently
+        # greyed-out button is chrome that never earns its width.
         self.btn_golive = QPushButton("Go live")
         self.btn_golive.clicked.connect(self.go_live)
-        self.btn_golive.setEnabled(False)
+        self.btn_golive.hide()
         h.addWidget(self.btn_golive)
 
         # Nothing in the toolbar takes focus, so Space stays bound to Freeze
@@ -253,10 +236,10 @@ class Main(QMainWindow):
             a.triggered.connect(fn)
             self.addAction(a)
 
-        add(["Space"], lambda: self.btn_pause.toggle())
+        add(["Space"], lambda: self.on_pause(not self.view.frozen))
         add(["R"], self.on_reset)
         add(["M"], self.on_mark)
-        add(["Esc"], lambda: self.btn_live.setChecked(True))
+        add(["Esc"], lambda: self.on_follow(True))
         add(["Q", "Ctrl+Q"], self.close)
         add(["["], lambda: self.cb_window.setCurrentIndex(
             max(0, self.cb_window.currentIndex() - 1)))
@@ -326,14 +309,13 @@ class Main(QMainWindow):
         self.refresh()
 
     def on_range(self):
-        self.btn_live.setChecked(self.view.follow)
+        # Follow state is reported by the status bar, not by a button. A drag
+        # or a wheel turns it off; Esc turns it back on.
         self.refresh()
 
     def on_pause(self, on):
         self.view.frozen = on
         self.view.follow = not on
-        self.btn_live.setChecked(not on)
-        self.btn_pause.setText("Resume" if on else "Freeze")
         self.refresh()
 
     def on_reset(self):
@@ -351,7 +333,6 @@ class Main(QMainWindow):
     def on_window(self, i):
         self.view.window = float(View.WINDOWS[i][0])
         self.view.follow = True
-        self.btn_live.setChecked(True)
         self.view.update_range()
         self.refresh()
 
@@ -394,6 +375,13 @@ class Main(QMainWindow):
             self, "Open amdgraph session", DATA_DIR, "CSV (*.csv);;All (*)")
         return path
 
+    def on_overlay_button(self):
+        """One button, two states: load a ghost, or drop the one that is up."""
+        if self.view.overlay is not None:
+            self.on_clear_overlay()
+        else:
+            self.on_overlay()
+
     def on_overlay(self):
         path = self._pick()
         if not path:
@@ -405,7 +393,7 @@ class Main(QMainWindow):
             return
         self.view.overlay = st
         self.view.overlay_name = os.path.basename(path)
-        self.btn_clear.setEnabled(True)
+        self.btn_overlay.setText("Clear overlay")
         self.refresh()
 
     def on_mark(self):
@@ -422,14 +410,15 @@ class Main(QMainWindow):
             self.recorder.mark(t, label)
         self.refresh()
 
-    def on_cap_rate(self, i):
-        self.sampler.set_cap_rate(CAP_RATES[i][0])
+    def on_cap_rate(self, hz):
+        """From the Cap reason pane's context menu."""
+        self.sampler.set_cap_rate(hz)
         self.refresh()
 
     def on_clear_overlay(self):
         self.view.overlay = None
         self.view.overlay_name = ""
-        self.btn_clear.setEnabled(False)
+        self.btn_overlay.setText("Overlay…")
         self.refresh()
 
     def on_open(self, path=None):
@@ -452,7 +441,7 @@ class Main(QMainWindow):
         self.view.window = 0.0
         self.cb_window.setCurrentIndex(len(View.WINDOWS) - 1)
         self.view.update_range()
-        self.btn_golive.setEnabled(True)
+        self.btn_golive.show()
         self.setWindowTitle(f"amdgraph — {os.path.basename(path)}")
         self.refresh()
 
@@ -464,7 +453,7 @@ class Main(QMainWindow):
         self.view.window = float(View.WINDOWS[1][0])
         self.cb_window.setCurrentIndex(1)
         self.view.unzoom()
-        self.btn_golive.setEnabled(False)
+        self.btn_golive.hide()
         self.setWindowTitle("amdgraph")
         self.refresh()
 

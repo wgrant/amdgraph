@@ -65,7 +65,7 @@ class TestSampling:
         assert source.ticks == 4              # still sampling
         assert main.view.frozen and not main.view.follow
         assert (main.view.t0, main.view.t1) == before
-        assert main.btn_pause.text() == "Resume"
+        assert "FROZEN" in main.status.text()
 
     def test_browsing_a_recording_stops_sampling(self, main, source, tmp_path):
         path = self._record(main, tmp_path)
@@ -166,7 +166,7 @@ class TestSessions:
         assert not main.live
         assert main.view.store is not live
         assert main.store is live             # still there, still ours
-        assert main.btn_golive.isEnabled()
+        assert not main.btn_golive.isHidden()
         assert "amdgraph —" in main.windowTitle()
 
     def test_go_live_switches_back(self, main, recorded):
@@ -174,7 +174,7 @@ class TestSessions:
         main.go_live()
         assert main.live
         assert main.view.store is main.store
-        assert not main.btn_golive.isEnabled()
+        assert main.btn_golive.isHidden()
         assert main.windowTitle() == "amdgraph"
 
     def test_open_shows_the_whole_recording(self, main, recorded):
@@ -188,10 +188,11 @@ class TestSessions:
         main.on_overlay()
         assert main.view.overlay is not None
         assert main.view.store is live
-        assert main.btn_clear.isEnabled()
-        main.on_clear_overlay()
+        assert main.btn_overlay.text() == "Clear overlay"
+        # The same button now drops it -- the two actions are never both valid.
+        main.btn_overlay.click()
         assert main.view.overlay is None
-        assert not main.btn_clear.isEnabled()
+        assert main.btn_overlay.text() == "Overlay…"
 
     @pytest.mark.parametrize("body", ["not a recording at all\n", ""])
     def test_a_bad_file_warns_and_changes_nothing(self, main, tmp_path, body):
@@ -238,10 +239,18 @@ class TestHandlers:
         assert main.view.window == float(seconds)
         assert main.view.follow
 
-    @pytest.mark.parametrize("i, hz", list(enumerate(r[0] for r in CAP_RATES)))
-    def test_cap_rate_reaches_the_source(self, main, source, i, hz):
-        main.on_cap_rate(i)
+    @pytest.mark.parametrize("hz", [r[0] for r in CAP_RATES])
+    def test_cap_rate_reaches_the_source(self, main, source, hz):
+        """The control lives on the Cap reason pane's context menu now, so the
+        route that matters is pane signal -> window -> source."""
+        main.throttle._set_cap_rate(hz)
         assert source.cap_rates[-1] == hz
+        assert main.throttle.cap_hz == hz
+
+    def test_the_pane_shows_the_rate_its_percentages_are_measured_over(self,
+                                                                       main):
+        from amdgraph.panes import CAP_DEFAULT, CAP_RATES
+        assert main.throttle.cap_hz == CAP_RATES[CAP_DEFAULT][0]
 
     def test_cursor_is_applied_immediately(self, main):
         main.on_cursor(12.5)
@@ -280,6 +289,55 @@ class TestHandlers:
         main.close()
         assert main.recorder is None
         assert source.closed == 2
+
+
+class TestShortcuts:
+    """Freeze, Reset and Follow lost their buttons, so the key bindings are now
+    the only way to reach them. That makes them load-bearing rather than a
+    convenience."""
+
+    @staticmethod
+    def press_key(main, key):
+        from PyQt6.QtGui import QKeySequence
+        want = QKeySequence(key)
+        for a in main.actions():
+            if want in a.shortcuts():
+                a.trigger()
+                return True
+        return False
+
+    def test_space_toggles_freeze_both_ways(self, main, source):
+        assert self.press_key(main, "Space")
+        assert main.view.frozen and not main.view.follow
+        before = source.ticks
+        main.tick()
+        assert source.ticks == before + 1        # frozen view, live sampling
+        assert self.press_key(main, "Space")
+        assert not main.view.frozen and main.view.follow
+
+    def test_escape_restores_following(self, main):
+        main.view.zoom_to(1.0, 20.0)
+        assert not main.view.follow
+        assert self.press_key(main, "Esc")
+        assert main.view.follow
+
+    def test_r_resets(self, main, source):
+        for _ in range(4):
+            main.tick()
+        assert self.press_key(main, "R")
+        assert main.store.n == 0
+        assert source.resets == 1
+
+    def test_m_marks(self, main):
+        main.tick()
+        assert self.press_key(main, "M")
+        assert main.view.markers                 # the dialog is stubbed
+
+    @pytest.mark.parametrize("key, idx", [("[", 0), ("]", 2)])
+    def test_bracket_keys_step_the_window(self, main, key, idx):
+        main.cb_window.setCurrentIndex(1)
+        assert self.press_key(main, key)
+        assert main.cb_window.currentIndex() == idx
 
 
 class TestStatus:
