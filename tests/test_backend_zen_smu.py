@@ -12,7 +12,7 @@ from amdgraph import fields
 from amdgraph.backends import zen_smu
 from amdgraph.fields import N_CORES
 from amdgraph.smu.pm_tables import (PHOENIX_VERSION, PROFILES,
-                                   STRIX_HALO_VERSION)
+                                   STRIX_HALO_VERSION, STRIX_POINT_VERSIONS)
 from amdgraph.sysfs import RealFS
 
 
@@ -81,6 +81,28 @@ class TestPmDecode:
         assert s["core_freqeff_mean"] == 750.0
         assert s["ppt_fast_head"] == 45.0
 
+    def test_source_derived_strix_point_profile(self, tmp_path, monkeypatch):
+        values = {
+            0: 45.0, 1: 30.0, 12: 70.0, 13: 20.0,
+            16: 100.0, 17: 65.0, 18: 100.0, 19: 55.0,
+            20: 100.0, 21: 48.0, 22: 100.0, 23: 46.0,
+            304: 1800.0,
+        }
+        for i in range(12):
+            values.update({630 + i: i + 1.0, 642 + i: 0.9,
+                           654 + i: 40.0 + i, 666 + i: 3.5})
+        p = tmp_path / "pm_table"
+        p.write_bytes(pm_blob(values, size=853))
+        monkeypatch.setattr(zen_smu, "TABLE", str(p))
+        s = {}
+        zen_smu.ZenSmuBackend(STRIX_POINT_VERSIONS[0]).sample(s, RealFS())
+        assert s["stapm"] == 30.0 and s["tdc_lim"] == 70.0
+        assert s["tctl"] == 65.0 and s["tctl_lim"] == 100.0
+        assert s["thm_gfx"] == 48.0 and s["thm_soc"] == 46.0
+        assert s["gfx_clk"] == 1800.0
+        assert s["core_power_sum"] == pytest.approx(78.0)
+        assert s["core_freq_11"] == 3500.0
+
 
 class TestProbe:
     def test_missing_driver_reports_and_declines(self, tmp_path, monkeypatch):
@@ -99,7 +121,8 @@ class TestProbe:
         assert "0xdeadbeef" in note
 
     @pytest.mark.parametrize("version", [PHOENIX_VERSION,
-                                          STRIX_HALO_VERSION])
+                                          STRIX_HALO_VERSION,
+                                          *STRIX_POINT_VERSIONS])
     def test_supported_version_is_accepted(self, tmp_path, monkeypatch,
                                            version):
         p = tmp_path / "pm_table_version"
@@ -114,5 +137,6 @@ class TestProbe:
 def test_supported_versions_are_the_verified_ones():
     """Bumping either of these without re-validating the field map is the
     mistake this whole program is arranged to prevent."""
-    assert set(PROFILES) == {0x004C0009, 0x0064020C}
+    assert set(PROFILES) == {0x004C0009, 0x005D0008, 0x005D0009,
+                             0x0064020C}
     assert (fields.GM_VERSION, fields.GM_SIZE) == ((2, 1), 120)

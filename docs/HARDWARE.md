@@ -79,7 +79,7 @@ them.
 |---|---|---|
 | Renoir / Lucienne | `0x0037xxxx` | |
 | Phoenix / Hawk Point | `0x004C0006`–`0x004C0009` | ours is `0009` |
-| Strix Point | `0x005D0008`–`0x005D000B` | RyzenAdj: *"looks correct from dumping table"* |
+| Strix Point | `0x005D0008`–`0x005D0009` | Source-derived profile: modern RyzenAdj tests plus amkillam table/version support; not locally reproduced |
 | Strix Halo | `0x0064020C` | RyzenAdj: *"looks correct… defaults to 70W"*, and *"untested!"* on one accessor |
 | Krackan Point | `0x00650005` | |
 | Granite Ridge | desktop family (`0x38xxxx` / `0x54xxxx` in ryzen_smu) | different shape entirely |
