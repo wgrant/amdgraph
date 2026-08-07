@@ -3,6 +3,18 @@
 Live strip charts for AMD Ryzen laptops — the SMU's own view of itself, not the
 handful of sensors a generic monitor finds.
 
+![amdgraph running on a Ryzen 7 PRO 7840U: a cap-reason strip showing SPL, FPPT
+and SPPT asserted, package power against its limits, SMU and system
+temperatures, CPU clock, and a per-core clock heat strip, all on one time
+axis](docs/screenshot.png)
+
+Nine minutes on a ThinkPad X13. Around 6:00 the platform pulls the budget down
+and everything follows: package power from 28 W to 10, the per-core strip going
+dark, both temperatures falling away. The dashed ceilings step down with it —
+they are plotted as the time series they are, not drawn at whatever the limit
+happens to read now, because on this machine they move constantly and a flat
+line would silently rewrite history.
+
 STAPM and PPT budgets against their moving limits, the STT skin-temperature
 model that actually governs sustained clocks, VRM current (TDC/EDC), per-core
 power/clock/residency, and the SMU's own answer to *why* it is holding the part
