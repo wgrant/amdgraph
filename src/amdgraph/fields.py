@@ -6,12 +6,10 @@ comments record how; they are the substance of this module. No logic, no
 imports from the rest of the package.
 """
 
-# The rendering/storage ceiling. gpu_metrics_v3_0, used by Strix Point and
-# Strix Halo, publishes sixteen physical cores. Older backends simply omit the
-# rows they do not own; a future topology-aware catalogue can hide those empty
-# rows rather than making the hardware decoder lie about the ABI's width.
-N_CORES = 16
-PHOENIX_CORES = 8
+# Largest per-core ABI currently decoded. This is not the detected core count
+# and not a recording-schema width: topology and backend descriptors own those
+# separate concepts.
+MAX_CORE_SLOTS = 16
 
 # The amdgpu device is discovered, not named. It was hardcoded to card1 for as
 # long as this only ran on one machine, which is true there and false almost

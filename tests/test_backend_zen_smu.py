@@ -10,7 +10,7 @@ from conftest import pm_blob
 
 from amdgraph import fields
 from amdgraph.backends import zen_smu
-from amdgraph.fields import N_CORES
+from amdgraph.fields import MAX_CORE_SLOTS
 from amdgraph.smu.pm_tables import (PHOENIX_VERSION, PROFILES,
                                    STRIX_HALO_VERSION, STRIX_POINT_VERSIONS)
 from amdgraph.sysfs import MemoryFS, RealFS
@@ -38,7 +38,7 @@ class TestPmDecode:
         assert s["gfx_clk"] == pytest.approx(2700.0, abs=0.1)    # GHz -> MHz
 
     def test_per_core_aggregates(self, decode):
-        s = decode({513 + i: float(i + 1) for i in range(N_CORES)})  # 1..8 W
+        s = decode({513 + i: float(i + 1) for i in range(MAX_CORE_SLOTS)})
         assert s["core_power_max"] == pytest.approx(8.0)
         assert s["core_power_mean"] == pytest.approx(4.5)
         assert s["core_power_sum"] == pytest.approx(36.0)
@@ -47,7 +47,8 @@ class TestPmDecode:
 
     def test_detected_core_count_limits_slots_and_aggregates(
             self):
-        blob = pm_blob({513 + i: float(i + 1) for i in range(N_CORES)})
+        blob = pm_blob({513 + i: float(i + 1)
+                        for i in range(MAX_CORE_SLOTS)})
         s = {"core_count": 6.0}
         zen_smu.ZenSmuBackend().sample(s, MemoryFS(data={zen_smu.TABLE: blob}))
         assert s["core_power_mean"] == pytest.approx(3.5)
@@ -66,7 +67,7 @@ class TestPmDecode:
             18: 100.0, 19: 72.0, 20: 95.0, 21: 75.0,
             22: 90.0, 23: 50.0, 24: 85.0, 25: 48.0,
         }
-        for i in range(N_CORES):
+        for i in range(MAX_CORE_SLOTS):
             values.update({740 + i: i + 1.0, 756 + i: 1.0,
                            772 + i: 40.0 + i, 788 + i: 4.0,
                            804 + i: 0.75,

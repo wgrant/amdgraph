@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import QComboBox
 
 from . import render
 from .frame import PaneFrame, Readout
-from .fields import N_CORES, THROTTLE_BITS
+from .fields import MAX_CORE_SLOTS, THROTTLE_BITS
 from .palette import (CRITICAL, INK, INK_DIM, LUT, MUTED, PANE_BG, RAMP,
                       SERIES, alpha)
 from .panes import CAP_DEFAULT, CAP_RATES, HEAT_MODES
@@ -142,9 +142,9 @@ class CorePane(TimePane):
 
     ROW = 13
 
-    def __init__(self, view, parent=None, core_count=N_CORES):
+    def __init__(self, view, parent=None, core_count=MAX_CORE_SLOTS):
         super().__init__(view, parent)
-        self.core_count = max(1, min(N_CORES, int(core_count)))
+        self.core_count = max(1, min(MAX_CORE_SLOTS, int(core_count)))
         self.mode = 0
         self._buf = None
         fm = QFontMetrics(self.font())
@@ -155,7 +155,7 @@ class CorePane(TimePane):
 
     def set_core_count(self, core_count):
         """Resize the raster when switching between hosts or recordings."""
-        self.core_count = max(1, min(N_CORES, int(core_count)))
+        self.core_count = max(1, min(MAX_CORE_SLOTS, int(core_count)))
         self.fix_height(render.TOP + self.core_count * self.ROW + self._bar_h)
         self.update()
 
@@ -353,7 +353,7 @@ def throttle_frame(view, indent=0):
     return frame
 
 
-def core_frame(view, indent=0, core_count=N_CORES):
+def core_frame(view, indent=0, core_count=MAX_CORE_SLOTS):
     """The per-core strip and the selector for what its colour means.
 
     The title is just "Per-core": the combo beside it names the metric and its

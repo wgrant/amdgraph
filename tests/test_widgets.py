@@ -24,7 +24,7 @@ from PyQt6.QtWidgets import QComboBox                         # noqa: E402
 from amdgraph import render                                   # noqa: E402
 from amdgraph.axis import TimeAxis                            # noqa: E402
 from amdgraph.chart import ChartPane, chart_frame             # noqa: E402
-from amdgraph.fields import N_CORES, THROTTLE_BITS            # noqa: E402
+from amdgraph.fields import MAX_CORE_SLOTS, THROTTLE_BITS     # noqa: E402
 from amdgraph.panes import (CAP_DEFAULT, CAP_RATES,            # noqa: E402
                             HEAT_MODES, PANES)
 from amdgraph.rasters import (CorePane, ThrottlePane,          # noqa: E402
@@ -99,7 +99,7 @@ class TestGutters:
 
     def rows_and_series(self):
         return ([n for _b, n, _f in THROTTLE_BITS]
-                + [f"core {i}" for i in range(N_CORES)],
+                + [f"core {i}" for i in range(MAX_CORE_SLOTS)],
                 [s.label for spec in PANES for s in spec.series])
 
     @pytest.mark.parametrize("pt", [6.0, 7.5, 9.0, 11.0, 14.0, 20.0])
@@ -313,7 +313,7 @@ class TestHeaderLayout:
         fm = QFontMetrics(body.font())
         widest = max(fm.horizontalAdvance(f"{v:.0f}") for v in (9999, 100.5))
         assert body.width() - r.right() - 12 >= widest
-        assert r.bottom() - r.top() == N_CORES * body.ROW
+        assert r.bottom() - r.top() == MAX_CORE_SLOTS * body.ROW
 
     def test_per_core_raster_height_tracks_detected_count(self, view):
         frame = core_frame(view, core_count=6)

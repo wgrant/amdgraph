@@ -179,6 +179,9 @@ class FakeSource:
     def meta(self):
         return dict(self._meta)
 
+    def metric_keys(self):
+        return tuple(self._keys)
+
     def set_cap_rate(self, hz):
         self.cap_rates.append(hz)
 

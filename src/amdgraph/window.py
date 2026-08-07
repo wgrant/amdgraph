@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (QComboBox, QFileDialog, QInputDialog, QLabel,
 from . import render
 from .axis import TimeAxis
 from .chart import chart_frame
-from .fields import N_CORES, THROTTLE_BITS
+from .fields import MAX_CORE_SLOTS, THROTTLE_BITS
 from .palette import INK, MUTED, SURFACE
 from .panes import HEAT_AFTER, PANES, THROTTLE_FIRST, available_catalogue
 from .rasters import core_frame, throttle_frame
@@ -72,8 +72,8 @@ class Main(QMainWindow):
         # window has always taken; it merely moves before assembly.
         initial = self.sampler.sample()
         detected_cores = initial.get("core_count")
-        self.core_count = (N_CORES if detected_cores is None else
-                           max(1, min(N_CORES, int(detected_cores))))
+        self.core_count = (MAX_CORE_SLOTS if detected_cores is None else
+                           max(1, min(MAX_CORE_SLOTS, int(detected_cores))))
         capabilities = (self.sampler.metric_keys()
                         if hasattr(self.sampler, "metric_keys") else initial)
         self.catalogue, self.catalogue_groups = available_catalogue(capabilities)
