@@ -83,6 +83,16 @@ class TestCatalogue:
 
 
 class TestStore:
+    def test_drop_before_compacts_samples_and_markers(self):
+        store = Store(cap=8)
+        for i in range(6):
+            store.append(float(i), {"x": float(i)})
+        store.markers = [(1.0, "old"), (4.0, "keep")]
+        store.drop_before(3.0)
+        assert list(store.times()) == [3.0, 4.0, 5.0]
+        assert list(store.col("x")) == [3.0, 4.0, 5.0]
+        assert store.markers == [(4.0, "keep")]
+
     def test_append_and_read_back(self):
         st = Store(cap=4)
         for i in range(3):

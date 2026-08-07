@@ -1,6 +1,7 @@
 """Layer 3 -- live history service, independent of any frontend."""
 
 import os
+import math
 import socket
 import time
 from datetime import datetime
@@ -33,6 +34,9 @@ class LocalHistoryService:
         self.store.append(t, sample)
         if self.persistence is not None:
             self.persistence.append(t, sample)
+            retention = self.persistence.retention_seconds
+            if retention is not None:
+                self.store.drop_before(t - retention)
         if self.recorder is not None:
             self.recorder.write(t, sample)
         return t, sample
@@ -44,6 +48,26 @@ class LocalHistoryService:
 
     def notes(self):
         return list(self.source.notes())
+
+    def history(self, start=None, end=None):
+        if self.persistence is not None:
+            return self.persistence.load(start, end)
+        if start is None and end is None:
+            return self.store
+        result = Store()
+        for i in range(self.store.n):
+            t = float(self.store.t[i])
+            if (start is not None and t < start) or (end is not None and t > end):
+                continue
+            values = {key: float(column[i]) for key, column in
+                      self.store.cols.items()
+                      if not math.isnan(float(column[i]))}
+            result.append(t, values)
+        result.markers = [(t, label) for t, label in self.store.markers
+                          if (start is None or t >= start)
+                          and (end is None or t <= end)]
+        result.meta = dict(self.store.meta)
+        return result
 
     def metadata(self):
         return dict(self.source.meta())

@@ -15,12 +15,16 @@ DEFAULT_SOCKET = os.path.join(
 DEFAULT_DATABASE = os.path.join(
     os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")),
     "amdgraph", "history.sqlite3")
+DEFAULT_RETENTION = 7 * 24 * 60 * 60
+DEFAULT_SNAPSHOT = 60 * 60
 
 
 class HistoryServer:
-    def __init__(self, service, path=DEFAULT_SOCKET):
+    def __init__(self, service, path=DEFAULT_SOCKET,
+                 snapshot_seconds=DEFAULT_SNAPSHOT):
         self.service = service
         self.path = path
+        self.snapshot_seconds = snapshot_seconds
         self.clients = set()
         self.server = None
         self._sampling = None
@@ -63,7 +67,9 @@ class HistoryServer:
                          "capabilities": list(self.service.capabilities()),
                          "metadata": self.service.metadata(),
                          "interval": self.service.interval})
-        await queue.put(snapshot(self.service.store))
+        end = self.service.store.span()[1]
+        await queue.put(snapshot(self.service.history(
+            max(0.0, end - self.snapshot_seconds), end)))
         try:
             while line := await reader.readline():
                 import json
@@ -83,7 +89,8 @@ class HistoryServer:
                     self.service.stop_recording()
                     await queue.put({"type": "recording", "path": None})
                 elif kind == "snapshot":
-                    await queue.put(snapshot(self.service.store))
+                    await queue.put(snapshot(self.service.history(
+                        request.get("start"), request.get("end"))))
         finally:
             self.clients.discard(queue)
             peer_writer.cancel()
@@ -102,7 +109,7 @@ class HistoryServer:
 
 
 async def serve(interval=1.0, path=DEFAULT_SOCKET, database=DEFAULT_DATABASE,
-                retention=None):
+                retention=DEFAULT_RETENTION):
     persistence = SQLiteHistory(database, retention) if database else None
     service = LocalHistoryService(interval, persistence=persistence)
     if persistence is not None:
@@ -123,7 +130,8 @@ def main(argv=None):
     parser.add_argument("-i", "--interval", type=float, default=1.0)
     parser.add_argument("--socket", default=DEFAULT_SOCKET)
     parser.add_argument("--database", default=DEFAULT_DATABASE)
-    parser.add_argument("--retention", type=float, metavar="SECONDS")
+    parser.add_argument("--retention", type=float, metavar="SECONDS",
+                        default=DEFAULT_RETENTION)
     args = parser.parse_args(argv)
     asyncio.run(serve(max(0.1, args.interval), args.socket,
                       args.database, args.retention))

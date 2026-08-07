@@ -95,3 +95,16 @@ class Store:
     def span(self):
         return (0.0, 0.0) if self.n == 0 else (float(self.t[0]),
                                                float(self.t[self.n - 1]))
+
+    def drop_before(self, cutoff):
+        """Discard an old prefix in place while retaining allocated capacity."""
+        first = int(np.searchsorted(self.t[:self.n], cutoff, side="left"))
+        if first <= 0:
+            return
+        remaining = self.n - first
+        self.t[:remaining] = self.t[first:self.n]
+        for column in self.cols.values():
+            column[:remaining] = column[first:self.n]
+            column[remaining:self.n] = np.nan
+        self.n = remaining
+        self.markers = [(t, label) for t, label in self.markers if t >= cutoff]

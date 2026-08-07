@@ -99,6 +99,9 @@ class RemoteHistoryService:
     def reset(self):
         self._send({"type": "snapshot"})
 
+    def request_history(self, start=None, end=None):
+        self._send({"type": "snapshot", "start": start, "end": end})
+
     def start_recording(self, path=None):
         self._send({"type": "record_start", "path": path})
 
@@ -108,5 +111,9 @@ class RemoteHistoryService:
     def close(self):
         self._stop.set()
         if self._socket is not None:
+            try:
+                self._socket.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
             self._socket.close()
         self._thread.join(timeout=2.0)
