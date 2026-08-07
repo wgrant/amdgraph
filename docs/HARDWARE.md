@@ -162,6 +162,13 @@ report two. The probe captures this as `l3_groups`.
 `dytc_lapmode`. None of that exists elsewhere. Framework uses `cros_ec`, the
 Steam Deck a jupiter/`steamdeck` driver, desktops `nct6775`-class chips.
 
+On the Framework Desktop (Dogwood), the EC source identifies the five hwmon
+temperature channels as board power, memory, ambient, APU SB-TSI and a filtered
+virtual APU temperature.  It also declares three fan channels.  Its two INA236
+monitors measure the 12 V APU and 5 V standby rails, but expose those readings
+only to the EC console, not the Linux `cros_ec` hwmon ABI; amdgraph therefore
+does not attempt raw I2C access to them.
+
 **The Framework 13 Phoenix is the ideal first port**: same silicon, different
 platform, so it isolates this axis from the other three. Do it before any new
 SoC.

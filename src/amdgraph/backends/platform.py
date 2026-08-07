@@ -45,19 +45,24 @@ class CrosEcBackend(Backend):
     """Framework's ChromeOS EC hwmon interface.
 
     Labels in the hwmon node identify these independently of its moving index.
-    On the Strix Halo Framework Desktop the CPU and mainboard ambient channels
-    are temp4 and temp3 respectively; unlike thinkpad_acpi there is no exposed
-    fan-command mode, only achieved RPM and a target for fan 1.
+    Dogwood firmware declares, in order, board power, memory, ambient, SB-TSI
+    APU and filtered virtual-APU channels.  The Linux cros_ec hwmon ABI keeps
+    that declaration order.  Unlike thinkpad_acpi there is no exposed
+    fan-command mode, only achieved RPM (and a target for fan 1).
     """
 
     def __init__(self, ec):
         self.ec = ec
 
     def sample(self, s, fs):
+        s["ec_power"] = fs.read_num(f"{self.ec}/temp1_input", 1000)
+        s["ec_memory"] = fs.read_num(f"{self.ec}/temp2_input", 1000)
+        s["ec_ambient"] = fs.read_num(f"{self.ec}/temp3_input", 1000)
         s["ec_cpu"] = fs.read_num(f"{self.ec}/temp4_input", 1000)
-        s["ec_skin"] = fs.read_num(f"{self.ec}/temp3_input", 1000)
+        s["ec_cpu_virtual"] = fs.read_num(f"{self.ec}/temp5_input", 1000)
         s["fan1"] = fs.read_num(f"{self.ec}/fan1_input")
         s["fan2"] = fs.read_num(f"{self.ec}/fan2_input")
+        s["fan3"] = fs.read_num(f"{self.ec}/fan3_input")
 
 
 def fan_command(tp, fs):

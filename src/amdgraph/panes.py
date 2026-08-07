@@ -205,9 +205,16 @@ PANES = [
     PaneSpec("System temperature", "°C", [
         ("ec_skin", "EC skin", None),
         ("ec_cpu", "EC CPU", None),
+        ("ec_cpu_virtual", "EC APU virtual", None),
         ("gpu_edge", "GPU edge", None),
         ("nvme", "NVMe", None),
     ], floor0=False),
+    PaneSpec("Board temperature", "°C", [
+        ("ec_power", "power", None),
+        ("ec_memory", "memory", None),
+        ("ec_ambient", "ambient", None),
+    ], floor0=False,
+        note="Dogwood EC thermistors used by its fallback fan policy"),
     PaneSpec("CPU clock", "MHz", [
         ("core_freq_max", "peak core", "core_freq_limit", True),
         ("core_freq_mean", "mean core", None),
@@ -258,6 +265,7 @@ PANES = [
     PaneSpec("Fan speed", "rpm", [
         ("fan1", "fan 1", None),
         ("fan2", "fan 2", None),
+        ("fan3", "fan 3", None),
     ], height=90),
     # No Reliability/FIT pane. FIT itself is real -- Failures In Time, the
     # ageing/electromigration budget, which AMD's SMU spends by capping

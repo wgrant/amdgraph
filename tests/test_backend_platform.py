@@ -43,10 +43,14 @@ def test_probe_is_silent_when_not_a_thinkpad():
 
 
 def test_cros_ec_reads_framework_temperatures_and_fans(tmp_path):
-    for name, value in (("temp4_input", 41850), ("temp3_input", 33850),
-                        ("fan1_input", 900), ("fan2_input", 800)):
+    for name, value in (("temp1_input", 43850), ("temp2_input", 39850),
+                        ("temp3_input", 33850), ("temp4_input", 41850),
+                        ("temp5_input", 40850), ("fan1_input", 900),
+                        ("fan2_input", 800), ("fan3_input", 700)):
         (tmp_path / name).write_text(f"{value}\n")
     out = {}
     platform.CrosEcBackend(str(tmp_path)).sample(out, RealFS())
-    assert out == {"ec_cpu": 41.85, "ec_skin": 33.85,
-                   "fan1": 900.0, "fan2": 800.0}
+    assert out == {"ec_power": 43.85, "ec_memory": 39.85,
+                   "ec_ambient": 33.85, "ec_cpu": 41.85,
+                   "ec_cpu_virtual": 40.85, "fan1": 900.0,
+                   "fan2": 800.0, "fan3": 700.0}

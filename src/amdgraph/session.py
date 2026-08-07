@@ -37,7 +37,8 @@ def record_keys():
     keys += ["stapm_head", "ppt_slow_head", "ppt_fast_head",
              "core_power_sum", "cpu_busy", "gpu_busy", "sclk", "sclk_hw",
              "socclk", "gpu_edge", "gpu_power", "ec_skin", "ec_cpu",
-             "fan1", "fan2", "fan_cmd", "nvme", "batt_power",
+             "ec_cpu_virtual", "ec_power", "ec_memory", "ec_ambient",
+             "fan1", "fan2", "fan3", "fan_cmd", "nvme", "batt_power",
              "pprof", "ac_online", "batt_charging", "lapmode", "palm"]
     seen, out = set(), []
     for k in keys:
