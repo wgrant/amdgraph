@@ -12,7 +12,7 @@ import pytest
 pytest.importorskip("PyQt6.QtWidgets")
 
 from amdgraph.panes import (CAP_RATES, GROUPS, HEAT_AFTER,     # noqa: E402
-                            PANES)
+                            PANES, available_catalogue)
 from amdgraph.rasters import CorePane, ThrottlePane            # noqa: E402
 from amdgraph.session import load_session                      # noqa: E402
 from amdgraph.view import View                                 # noqa: E402
@@ -55,6 +55,13 @@ class TestAssembly:
         main.resize(320, 700)
         main.show()
         assert main.minimumSizeHint().width() <= 320
+
+    def test_unowned_series_and_empty_panes_are_absent(self):
+        panes, groups = available_catalogue({"stapm", "stapm_lim",
+                                             "core_freq_mean"})
+        assert [p.title for p in panes] == ["Package power", "CPU clock"]
+        assert [s.label for s in panes[0].series] == ["STAPM"]
+        assert groups == []
 
 
 class TestSections:

@@ -25,7 +25,7 @@ from .axis import TimeAxis
 from .chart import chart_frame
 from .fields import N_CORES, THROTTLE_BITS
 from .palette import INK, MUTED, SURFACE
-from .panes import GROUPS, HEAT_AFTER, PANES, THROTTLE_FIRST
+from .panes import HEAT_AFTER, PANES, THROTTLE_FIRST, available_catalogue
 from .rasters import core_frame, throttle_frame
 from .render import fmt_time
 from .sampler import Sampler
@@ -65,6 +65,14 @@ class Main(QMainWindow):
         self.live = True
         self._cursor_pending = False
         self.t_start = time.monotonic()
+        # One real sample doubles as the capability inventory. Backends emit
+        # owned keys with None when a reading is temporarily absent, so this
+        # filters unsupported series without mistaking one missed read for an
+        # unsupported sensor. It is also the one construction-time sample the
+        # window has always taken; it merely moves before assembly.
+        initial = self.sampler.sample()
+        self.catalogue, self.catalogue_groups = available_catalogue(initial)
+        self.store.append(time.monotonic() - self.t_start, initial)
 
         # Size the shared gutters to the text that actually has to fit, before
         # any pane is built. Fixed pixel counts clipped labels on any desktop
@@ -73,7 +81,7 @@ class Main(QMainWindow):
             render.pane_font(),
             [n for _b, n, _f in THROTTLE_BITS]
             + [f"core {i}" for i in range(N_CORES)],
-            [s.label for spec in PANES for s in spec.series])
+            [s.label for spec in self.catalogue for s in spec.series])
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -105,10 +113,10 @@ class Main(QMainWindow):
         # built by walking PANES in order and opening a section when its first
         # member comes up.
         self.sections = []
-        opens = {g.titles[0]: g for g in GROUPS}
-        grouped = {t for g in GROUPS for t in g.titles}
+        opens = {g.titles[0]: g for g in self.catalogue_groups}
+        grouped = {t for g in self.catalogue_groups for t in g.titles}
         header, members = None, []
-        for spec in PANES:
+        for spec in self.catalogue:
             if spec.title in opens:
                 group = opens[spec.title]
                 header = SectionHeader(group)
@@ -167,7 +175,8 @@ class Main(QMainWindow):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.tick)
         self.timer.start(int(interval * 1000))
-        self.tick()
+        self.view.update_range()
+        self.refresh()
 
         if open_path:
             self.open_session(open_path)

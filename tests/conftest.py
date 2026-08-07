@@ -153,7 +153,11 @@ class FakeSource:
     change to the window.
     """
 
-    def __init__(self, notes=(), meta=None, keys=("stapm", "tctl", "thr0")):
+    def __init__(self, notes=(), meta=None, keys=None):
+        if keys is None:
+            from amdgraph.panes import PANES
+            keys = tuple(s.key for pane in PANES for s in pane.series)
+            keys += ("thr0",)
         self._notes = list(notes)
         self._meta = dict(meta or {"pm_table_version": "0x004c0009"})
         self._keys = keys

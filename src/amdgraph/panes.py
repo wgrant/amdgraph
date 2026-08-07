@@ -53,6 +53,39 @@ class PaneSpec:
         self.note = note
 
 
+def available_catalogue(keys):
+    """Return fresh pane/group specs containing only data this source owns.
+
+    Backends put keys in every sample even when the current reading is absent,
+    using ``None`` for that instant.  That makes the first sample a capability
+    description without adding a seventh method to the source protocol.  A
+    transiently missing sensor therefore remains in the catalogue, while a
+    Phoenix-only field that a Strix backend never emits does not consume a row
+    forever labelled "no data".
+
+    Fresh specs matter too: legend clicks mutate ``Series.visible``.  Sharing
+    the module-level catalogue between two windows otherwise leaks visibility
+    state from one session into the next.
+    """
+    keys = set(keys)
+    specs = []
+    for original in PANES:
+        series = [(s.key, s.label, s.limit, s.good_high)
+                  for s in original.series if s.key in keys]
+        if series:
+            specs.append(PaneSpec(original.title, original.unit, series,
+                                  original.floor0, original.height,
+                                  original.note))
+    titles = {s.title for s in specs}
+    groups = []
+    for original in GROUPS:
+        members = tuple(t for t in original.titles if t in titles)
+        if members:
+            groups.append(PaneGroup(original.title, members,
+                                    original.collapsed, original.note))
+    return specs, groups
+
+
 # Ordered as the diagnosis runs: what is capping it, then the three things that
 # can cap it (power, current, heat), then what that bought in clocks, then the
 # physical system, then platform policy.
