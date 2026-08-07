@@ -29,6 +29,7 @@ from .palette import MARKER, PANE_BG, alpha
 LEFT = 72          # y-axis gutter, and the cap-reason / per-core row labels
 RIGHT = 104        # room for end-of-line direct labels
 HEADER_H = 26      # the header row of widgets above each painted body
+INDENT = 14        # how far a grouped pane sits inside its section
 TOP = 2            # breathing room at the top of the body itself
 BOTTOM = 6
 

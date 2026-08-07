@@ -98,6 +98,34 @@ class TestSections:
         assert all(p.body.view is main.view
                    for p in self.members(main, section.group))
 
+    def test_grouped_panes_are_indented(self, main):
+        from amdgraph import render
+        section = main.sections[0]
+        inside = self.members(main, section.group)
+        outside = [p for p in main.panes if p not in inside]
+        assert all(p._indent == render.INDENT for p in inside)
+        assert all(p._indent == 0 for p in outside)
+
+    def test_indenting_does_not_move_the_plot(self, main):
+        """Every pane shares one time axis. If an indented pane's plot moved
+        with its frame, its gridlines and crosshair would stop lining up with
+        the ruler and with the panes above it -- so the body gives the indent
+        back out of its own gutter."""
+        from PyQt6.QtCore import QPoint
+        from PyQt6.QtWidgets import QApplication
+        main.sections[0].set_expanded(True)
+        main.resize(1180, 900)
+        main.show()
+        QApplication.instance().processEvents()
+
+        lefts, rights = set(), set()
+        for f in main.panes:
+            b, r = f.body, f.body.plot_rect()
+            lefts.add(b.mapToGlobal(QPoint(int(r.left()), 0)).x())
+            rights.add(b.mapToGlobal(QPoint(int(r.right()), 0)).x())
+        assert len(lefts) == 1, f"plot left edges disagree: {sorted(lefts)}"
+        assert len(rights) == 1, f"plot right edges disagree: {sorted(rights)}"
+
     def test_a_collapsed_group_leaves_the_column_shorter(self, main):
         section = main.sections[0]
         section.set_expanded(False)

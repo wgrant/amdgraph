@@ -263,12 +263,29 @@ class TestPaneOwnedSettings:
         assert [frame.modes.itemText(i) for i in range(frame.modes.count())] \
             == [f"{n} ({u})" for _k, n, u, _l, _h in HEAT_MODES]
 
-    def test_choosing_a_metric_changes_the_body_and_the_title(self, view):
+    def test_choosing_a_metric_changes_the_body(self, view):
         frame = core_frame(view)
         frame.modes.setCurrentIndex(3)
         assert frame.body.mode == 3
-        name, unit = HEAT_MODES[3][1], HEAT_MODES[3][2]
-        assert frame.title.text() == f"Per-core {name}  ({unit})"
+
+    def test_the_metric_is_named_once_not_twice(self, view):
+        """The combo states the metric and its unit; a title repeating them
+        would say the same thing twice in one row."""
+        frame = core_frame(view)
+        assert frame.title.text() == "Per-core"
+        assert frame.modes.currentText() == \
+            f"{HEAT_MODES[0][1]} ({HEAT_MODES[0][2]})"
+
+    @pytest.mark.parametrize("build", [throttle_frame, core_frame],
+                             ids=["throttle", "core"])
+    def test_the_control_sits_against_the_title(self, view, build):
+        """It qualifies what the pane is, so it belongs next to the words it
+        modifies rather than out by the readout at the far end."""
+        frame = build(view)
+        row = frame.header.layout()
+        order = [row.itemAt(i).widget() for i in range(row.count())]
+        combo = next(w for w in order if isinstance(w, QComboBox))
+        assert order.index(combo) == order.index(frame.title) + 1
 
     def test_the_controls_do_not_take_focus(self, view):
         """A focused combo eats Space and the arrow keys; Space is the only

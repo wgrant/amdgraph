@@ -20,13 +20,13 @@ Two things stay painted, for the same reason the charts do:
 May import: palette, render.
 """
 
-from PyQt6.QtCore import QRectF, QSize, Qt
-from PyQt6.QtGui import QFont, QFontMetrics, QPainter
+from PyQt6.QtCore import QPointF, QRectF, QSize, Qt
+from PyQt6.QtGui import QFont, QFontMetrics, QPainter, QPen
 from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QSizePolicy,
                              QVBoxLayout, QWidget)
 
 from . import render
-from .palette import MUTED, PANE_BG
+from .palette import INK_DIM, MUTED, PANE_BG, SURFACE, alpha
 from .render import HEADER_H, pane_font
 
 
@@ -120,6 +120,15 @@ class PaneFrame(QWidget):
         self.title.setFont(f)
         h.addWidget(self.title)
 
+        # Controls sit against the title, not out by the readout. A pane's
+        # setting qualifies what the pane *is* -- "Per-core [clock (MHz)]"
+        # reads as one phrase -- so putting it at the far end of the row
+        # separates it from the words it modifies.
+        for c in controls:
+            c.setFont(pane_font())
+            c.setFixedHeight(HEADER_H - 6)
+            h.addWidget(c)
+
         if note:
             # Elides, and yields its width to the legend rather than the other
             # way round. It used to be drawn into a fixed 320 px box and cut
@@ -131,11 +140,6 @@ class PaneFrame(QWidget):
         else:
             self.note = None
             h.addStretch(1)
-
-        for c in controls:
-            c.setFont(pane_font())
-            c.setFixedHeight(HEADER_H - 6)
-            h.addWidget(c)
 
         if readout is not None:
             h.addWidget(readout, 0)
@@ -167,7 +171,20 @@ class PaneFrame(QWidget):
         # The header sits on the pane's own background, not the window's, so a
         # pane reads as one object rather than a strip floating above a chart.
         p = QPainter(self)
-        p.fillRect(self.rect(), PANE_BG)
+        if not self._indent:
+            p.fillRect(self.rect(), PANE_BG)
+            p.end()
+            return
+        # Indented: leave the margin as window background and run a rule down
+        # it, so the section reads as containing these panes rather than
+        # merely preceding them. The body has already given the indent back out
+        # of its own gutter, so the plot itself has not moved.
+        p.fillRect(self.rect(), SURFACE)
+        p.fillRect(QRectF(self._indent, 0, self.width() - self._indent,
+                          self.height()), PANE_BG)
+        p.setPen(QPen(alpha(INK_DIM, 60), 1))
+        x = self._indent / 2
+        p.drawLine(QPointF(x, 0), QPointF(x, self.height()))
         p.end()
 
 

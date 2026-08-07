@@ -117,7 +117,9 @@ class Main(QMainWindow):
                 members = []
                 header.toggled.connect(
                     lambda on, m=members: self._set_section(m, on))
-            frame = chart_frame(spec, self.view)
+            frame = chart_frame(spec, self.view,
+                                indent=(render.INDENT
+                                        if spec.title in grouped else 0))
             self._add_pane(frame)
             if spec.title in grouped:
                 members.append(frame)

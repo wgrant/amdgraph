@@ -340,18 +340,22 @@ def throttle_frame(view, indent=0):
 
 
 def core_frame(view, indent=0):
-    """The per-core strip and the selector for what its colour means."""
+    """The per-core strip and the selector for what its colour means.
+
+    The title is just "Per-core": the combo beside it names the metric and its
+    unit, and a title that repeated them would be stating the same fact twice
+    in one row -- which is what the toolbar version was doing from across the
+    window.
+    """
     body = CorePane(view)
     readout = CoreReadout(view, body)
 
     def pick(i):
         body.set_mode(i)
         readout.update()
-        frame.title.setText(f"Per-core {HEAT_MODES[i][1]}  ({HEAT_MODES[i][2]})")
 
     modes = _combo([f"{n} ({u})" for _k, n, u, _l, _h in HEAT_MODES], 0, pick)
-    frame = PaneFrame(body, f"Per-core {HEAT_MODES[0][1]}  ({HEAT_MODES[0][2]})",
-                      controls=[modes], readout=readout,
+    frame = PaneFrame(body, "Per-core", controls=[modes], readout=readout,
                       height=render.HEADER_H + body.minimumHeight(),
                       indent=indent)
     frame.modes = modes
