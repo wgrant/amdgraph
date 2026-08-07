@@ -169,7 +169,19 @@ PANES = [
         ("core_power_sum", "CPU cores", None),
         ("pwr_soc", "SoC", None),
     ], note="gap ≈ GPU/PHY/fabric; cores can still overshoot socket by ~1 W"),
+    # gpu_metrics_v3_0 separates the accelerator domains without relying on
+    # Strix Halo's undocumented pm_table. APU is the firmware's aggregate,
+    # while GFX/IPU/dGPU are component readings; they are deliberately drawn
+    # together rather than subtracted, since their averaging windows are not
+    # promised to match (the same trap that made pwr_rest unusable above).
+    PaneSpec("Accelerator power", "W", [
+        ("pwr_apu", "APU", None),
+        ("pwr_gfx", "GFX", None),
+        ("pwr_ipu", "IPU", None),
+        ("pwr_dgpu", "dGPU", None),
+    ], note="firmware aggregates and domains; do not read as a stack"),
     PaneSpec("Rail power", "W", [
+        ("pwr_system", "system total", None),
         ("gpu_power", "amdgpu hwmon", None),
         ("batt_power", "battery", None),
     ], note="independent views: driver-reported APU power, and DC draw"),
@@ -197,10 +209,11 @@ PANES = [
         ("nvme", "NVMe", None),
     ], floor0=False),
     PaneSpec("CPU clock", "MHz", [
-        ("core_freq_max", "peak core", None),
+        ("core_freq_max", "peak core", "core_freq_limit", True),
         ("core_freq_mean", "mean core", None),
         ("core_freqeff_mean", "mean effective", None),
-    ], height=124, note="peak vs mean = how evenly load is spread"),
+    ], height=124,
+        note="peak vs mean = spread; dashed = current firmware ceiling"),
     PaneSpec("SoC clock", "MHz", [
         ("fclk", "fclk", None),
         ("uclk", "uclk", None),
@@ -211,21 +224,34 @@ PANES = [
         ("gfx_clk", "gfx (SMU, instant)", "gfx_clk_max", True),
         ("sclk_hw", "sclk (DPM level)", None),
     ], note="SMU samples instantaneously; DPM reports a coarse level"),
+    PaneSpec("Accelerator clock", "MHz", [
+        ("vpeclk", "VPE", None),
+        ("ipuclk", "IPU", None),
+        ("vclk", "VCN", None),
+        ("mpipuclk", "MPIPU", None),
+    ]),
     # mem/swap are host OS figures, not SMU telemetry -- they read the same on
     # any Linux box, which is why they are also the only two series here that
     # still move on a machine with no ryzen_smu or amdgpu at all (a container).
     PaneSpec("Utilisation", "%", [
         ("cpu_busy", "CPU busy", None),
         ("gpu_busy", "GPU busy", None),
+        ("vcn_busy", "VCN busy", None),
+        ("ipu_busy_mean", "mean IPU", None),
         ("core_c0_mean", "mean C0", None),
         ("core_cc6_mean", "mean C6", None),
         ("mem_used_pct", "memory used", None),
         ("swap_used_pct", "swap used", None),
     ]),
-    PaneSpec("DRAM bandwidth", "GiB/s", [
-        ("dram_rd", "read", None),
-        ("dram_wr", "write", None),
-    ], note="peak here ≈ 95 GiB/s (6400 MT/s × 128-bit)"),
+    PaneSpec("Memory bandwidth", "GiB/s", [
+        ("dram_rd", "DRAM read", None),
+        ("dram_wr", "DRAM write", None),
+        ("ipu_rd", "IPU read", None),
+        ("ipu_wr", "IPU write", None),
+    ], note="DRAM peak here ≈ 95 GiB/s (6400 MT/s × 128-bit)"),
+    PaneSpec("IPU activity", "%", [
+        (f"ipu_busy_{i}", f"IPU {i}", None) for i in range(8)
+    ], note="one firmware activity column per IPU engine"),
     PaneSpec("Fan command", "level", [
         ("fan_cmd", "commanded", None),
     ], height=76, note="8 = disengaged; blank = firmware auto"),
@@ -276,7 +302,8 @@ PANES = [
 # above the fold on a 900 px window.
 GROUPS = [
     PaneGroup("Power detail",
-              ("VRM current", "Power breakdown", "Rail power", "Voltage"),
+              ("VRM current", "Power breakdown", "Accelerator power",
+               "Rail power", "Voltage"),
               collapsed=True,
               note="current, where the watts go, rails, voltage"),
 ]

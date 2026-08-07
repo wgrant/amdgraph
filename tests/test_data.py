@@ -65,6 +65,22 @@ class TestCatalogue:
         titles = [s.title for s in PANES]
         assert len(titles) == len(set(titles))
 
+    def test_strix_metrics_have_gui_homes(self):
+        by_title = {p.title: {s.key for s in p.series} for p in PANES}
+        assert by_title["Accelerator power"] == {
+            "pwr_apu", "pwr_gfx", "pwr_ipu", "pwr_dgpu"}
+        assert {"pwr_system", "gpu_power", "batt_power"} == \
+            by_title["Rail power"]
+        assert {"dram_rd", "dram_wr", "ipu_rd", "ipu_wr"} == \
+            by_title["Memory bandwidth"]
+        assert {f"ipu_busy_{i}" for i in range(8)} == \
+            by_title["IPU activity"]
+        assert {"vpeclk", "ipuclk", "vclk", "mpipuclk"} == \
+            by_title["Accelerator clock"]
+        cpu = next(p for p in PANES if p.title == "CPU clock")
+        assert next(s for s in cpu.series
+                    if s.key == "core_freq_max").limit == "core_freq_limit"
+
 
 class TestStore:
     def test_append_and_read_back(self):
