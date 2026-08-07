@@ -136,6 +136,10 @@ class PaneFrame(QWidget):
             self.note = ElidedLabel(note)
             self.note.setFont(pane_font())
             self.note.setStyleSheet(f"color:{MUTED.name()};")
+            # On a narrow window the legend wins the row and the note is left
+            # as a few words. That is the right priority -- the legend is live
+            # data -- but the sentence should still be recoverable.
+            self.note.setToolTip(note)
             h.addWidget(self.note, 1)
         else:
             self.note = None

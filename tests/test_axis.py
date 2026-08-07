@@ -76,6 +76,34 @@ def test_ticks_land_on_the_panes_gridlines(axis, view):
         assert axis_x == pytest.approx(pane_x, abs=1e-6)
 
 
+def test_a_tick_label_stands_aside_for_the_cursor_label(axis, view):
+    """Both are times, and the cursor's background is translucent, so an
+    overlap printed one over the other rather than one winning."""
+    from PyQt6.QtGui import QFontMetrics
+
+    from amdgraph.render import fmt_time
+    fm = QFontMetrics(axis.font())
+    left, w = render.LEFT, W - render.LEFT - render.RIGHT
+    span = view.t1 - view.t0
+
+    def box(t, pad):
+        x = left + (t - view.t0) / span * w
+        lw = fm.horizontalAdvance(fmt_time(t)) + pad
+        return x - lw / 2, x + lw / 2
+
+    ticks = time_ticks(view.t0, view.t1)
+    assert len(ticks) > 1
+    # Park the cursor a little past a tick, so the two labels must collide.
+    step = ticks[1] - ticks[0]
+    view.cursor = ticks[len(ticks) // 2] + step * 0.05
+    cur = box(view.cursor, 10)
+
+    drawn = [t for t in ticks
+             if not (box(t, 8)[0] < cur[1] and box(t, 8)[1] > cur[0])]
+    assert len(drawn) < len(ticks), "test did not actually create a collision"
+    paint(axis, axis.height())          # and it still paints
+
+
 def test_ticks_track_a_zoom(axis, view):
     view.zoom_to(view.t0 + 10, view.t0 + 40)
     ticks = time_ticks(view.t0, view.t1)
