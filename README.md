@@ -25,10 +25,9 @@ Sessions record to CSV and reload, either alone or as a ghost behind the live
 trace — so "did that `ryzenadj` change actually help" has an answer rather than
 an impression.
 
-> **Verified on Ryzen 7040-series (Phoenix) and Strix Halo.** Phoenix uses
-> `pm_table`; Strix Halo support currently uses the mainline kernel's
-> self-described `gpu_metrics_v3_0` fields and leaves its undocumented
-> `pm_table` panes empty. Sensor layouts are
+> **Verified on Ryzen 7040-series (Phoenix) and Strix Halo.** Both parts have
+> independently validated, version-gated `pm_table` maps; Strix Halo also uses
+> the mainline kernel's self-described `gpu_metrics_v3_0` fields. Sensor layouts are
 > part-specific and undocumented, so amdgraph decodes just the one it has
 > checked against live silicon, and leaves the affected panes empty on anything
 > else rather than showing numbers read from the wrong offsets. Adding a part is
@@ -151,9 +150,9 @@ nothing the SMU does not already report more precisely.
 
 Decoded and verified on **Ryzen 7 PRO 7840U (Phoenix)**: pm_table
 `0x004C0009`, `gpu_metrics_v2_1`; and **Ryzen AI MAX+ 395 (Strix Halo)**:
-`gpu_metrics_v3_0` (264 B). Strix Halo provides package/APU/GPU/core power,
-temperatures, clocks, C0 residency, DRAM bandwidth and cap-reason activity from
-the kernel ABI. Its pm_table `0x0064020C` remains deliberately undecoded.
+`pm_table 0x0064020C`, `gpu_metrics_v3_0` (264 B). Strix Halo provides moving
+STAPM/PPT budgets, per-core power/voltage/temperature/clock/C0/C1/C6, thermal
+ceilings, package/APU/GPU/IPU power, bandwidth and cap-reason activity.
 
 Other parts place these fields elsewhere, so amdgraph checks both layout
 versions at startup and **refuses to decode one it has not verified** rather

@@ -169,8 +169,8 @@ PANES = [
         ("core_power_sum", "CPU cores", None),
         ("pwr_soc", "SoC", None),
     ], note="gap ≈ GPU/PHY/fabric; cores can still overshoot socket by ~1 W"),
-    # gpu_metrics_v3_0 separates the accelerator domains without relying on
-    # Strix Halo's undocumented pm_table. APU is the firmware's aggregate,
+    # gpu_metrics_v3_0 separates the accelerator domains independently of the
+    # part-specific pm_table. APU is the firmware's aggregate,
     # while GFX/IPU/dGPU are component readings; they are deliberately drawn
     # together rather than subtracted, since their averaging windows are not
     # promised to match (the same trap that made pwr_rest unusable above).
@@ -317,6 +317,7 @@ CAP_DEFAULT = 2
 HEAT_MODES = [
     ("core_freq", "clock", "MHz", 400.0, 5200.0),
     ("core_c0", "C0 residency", "%", 0.0, 100.0),
+    ("core_c1", "C1 residency", "%", 0.0, 100.0),
     ("core_temp", "temperature", "°C", 30.0, 100.0),
     ("core_power", "power", "W", 0.0, 15.0),
     ("core_volt", "voltage", "V", 0.6, 1.4),

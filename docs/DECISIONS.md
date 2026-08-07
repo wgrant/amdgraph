@@ -9,6 +9,18 @@ repeating it.
 
 ---
 
+### Strix Halo pm_table fields are earned individually
+
+`gpu_metrics_v3_0` made Strix Halo useful without its undocumented PM table,
+but left moving STAPM/PPT budgets, thermal ceilings, voltage, C1 and C6 absent.
+The `0x0064020C` map now contains only fields separated under idle, CPU, memory,
+GPU and mixed loads and checked against kernel telemetry. The evidence and
+correlations live beside the indices in `fields.py`.
+
+Rejected: copying RyzenAdj's full Strix Halo accessor set. Its own annotations
+mark some accessors untested, and plausible values are not validation. Current
+and late fabric blocks remain unnamed even though candidates exist.
+
 ### Every text box is sized from the font
 
 Six clipping defects, all the same shape — a pixel count tuned against one

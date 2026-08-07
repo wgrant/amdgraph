@@ -29,7 +29,9 @@ mainline `amdgpu`.
 ## Currently supported
 
 **Ryzen 7 PRO 7840U (Phoenix), ThinkPad X13 Gen 4.** pm_table `0x004C0009`,
-`gpu_metrics_v2_1` (120 B), 8 cores, one L3 group.
+`gpu_metrics_v2_1` (120 B), 8 cores, one L3 group; and **Ryzen AI MAX+ 395
+(Strix Halo), Framework Desktop**, pm_table `0x0064020C`,
+`gpu_metrics_v3_0` (264 B), 16 cores in two L3 groups.
 
 The field map in `src/amdgraph/fields.py` is **measured**. What that meant:
 
@@ -53,6 +55,16 @@ reasoning in `fields.py` or `panes.py`: `ppt_apu` (constant zero), indices 26/27
 exceeds it), `average_gfx_power` (correlates +0.943 with the CPU core sum, not
 with GPU busy), `pwr_rest` (differencing noise an order of magnitude larger than
 the quantity).
+
+The Strix Halo map is likewise **measured**, from eight 4 Hz captures separating
+idle, 1/8/16-core CPU, memory, GPU and mixed CPU/GPU load. Package power agrees
+with `gpu_metrics_v3_0` at +0.972; the per-core power block at +0.956 and clock
+at +0.830. Selectively loading each L3 group separates the two cluster
+temperatures. C0 agrees with the kernel ABI at +0.975, while the three residency
+blocks sum to 100% and the other two follow Linux's shallow/deep cpuidle counters
+at +0.882/+0.744. Per-core voltage is cross-checked by predicting a separate
+current block from power/voltage at +0.959. The current block remains unexposed
+because the platform has no independent rail-current sensor.
 
 ## What varies, and how much
 
@@ -194,7 +206,7 @@ Parts available for validation, in the order they are worth doing — Framework
 first because it isolates the platform axis, then the newer silicon where
 `gpu_metrics` does more of the work for us:
 
-Phoenix (Framework 13) · Renoir · Strix Halo · Aerith · Sephiroth ·
+Phoenix (Framework 13) · Renoir · Aerith · Sephiroth ·
 Granite Ridge.
 
 **Granite Ridge is arguably a different tool.** No STT, no skin governor, no
