@@ -9,7 +9,7 @@ May import: fields, palette, panes, render, timepane.
 """
 
 import numpy as np
-from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
+from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter
 from PyQt6.QtWidgets import QMenu
 
@@ -20,6 +20,26 @@ from .palette import (CRITICAL, INK, INK_DIM, LUT, MUTED, PANE_BG, RAMP,
 from .panes import CAP_DEFAULT, CAP_RATES, HEAT_MODES
 from .render import TOP, column_hold, draw_markers, fmt_val, row_label_font
 from .timepane import TimePane
+
+
+def choice_menu(widget, title, choices, current, apply, at):
+    """A menu of mutually exclusive choices, with the current one ticked.
+
+    Both raster panes carry a setting that governs only themselves -- what the
+    colour means, and how often the bits are sampled -- and both already name
+    their current state in their own header. So the header is the state and
+    this is the control, rather than a widget in the toolbar that is nowhere
+    near the thing it changes.
+    """
+    menu = QMenu(widget)
+    menu.addAction(title).setEnabled(False)
+    menu.addSeparator()
+    for value, label in choices:
+        act = menu.addAction(label)
+        act.setCheckable(True)
+        act.setChecked(value == current)
+        act.triggered.connect(lambda _checked, v=value: apply(v))
+    menu.exec(at)
 
 
 class ThrottlePane(TimePane):
@@ -141,15 +161,18 @@ class ThrottlePane(TimePane):
         and 1 Hz also switches the background thread off entirely. Higher
         costs more CPU -- about 1.2% of a core at 20 Hz.
         """
-        menu = QMenu(self)
-        menu.addAction("Cap poll rate").setEnabled(False)
-        menu.addSeparator()
-        for hz, label in CAP_RATES:
-            act = menu.addAction(label)
-            act.setCheckable(True)
-            act.setChecked(hz == self.cap_hz)
-            act.triggered.connect(lambda _c, v=hz: self._set_cap_rate(v))
-        menu.exec(ev.globalPos())
+        self._menu(ev.globalPos())
+
+    def on_click(self, x, y):
+        """Clicking the header opens the same menu. Chart panes already respond
+        to a click up there, so it is the one part of a pane a reader has
+        reason to try."""
+        if y <= TOP:
+            self._menu(self.mapToGlobal(QPoint(int(x), int(y))))
+
+    def _menu(self, at):
+        choice_menu(self, "Cap poll rate", CAP_RATES, self.cap_hz,
+                    self._set_cap_rate, at)
 
     def _set_cap_rate(self, hz):
         self.cap_hz = hz
@@ -214,6 +237,26 @@ class CorePane(TimePane):
     def set_mode(self, i):
         self.mode = i
         self.update()
+
+    def contextMenuEvent(self, ev):
+        """Right-click picks what the colour means.
+
+        This used to be a combo in the toolbar, which was pinned at the top of
+        the window while this pane sits most of a screen down -- the control
+        was nowhere near the thing it controlled, and the header here already
+        names the current mode and its unit.
+        """
+        self._menu(ev.globalPos())
+
+    def on_click(self, x, y):
+        if y <= TOP:
+            self._menu(self.mapToGlobal(QPoint(int(x), int(y))))
+
+    def _menu(self, at):
+        choice_menu(self, "Per-core metric",
+                    [(i, f"{name} ({unit})")
+                     for i, (_k, name, unit, _l, _h) in enumerate(HEAT_MODES)],
+                    self.mode, self.set_mode, at)
 
     def plot_rect(self):
         return QRectF(render.LEFT, TOP,

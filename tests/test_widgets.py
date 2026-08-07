@@ -22,7 +22,8 @@ from PyQt6.QtGui import (QFont, QFontMetrics, QImage,         # noqa: E402
 from amdgraph import render                                   # noqa: E402
 from amdgraph.chart import ChartPane                          # noqa: E402
 from amdgraph.fields import N_CORES, THROTTLE_BITS            # noqa: E402
-from amdgraph.panes import HEAT_MODES, PANES                  # noqa: E402
+from amdgraph.panes import (CAP_RATES, HEAT_MODES,             # noqa: E402
+                            PANES)
 from amdgraph.rasters import CorePane, ThrottlePane           # noqa: E402
 from amdgraph.render import TOP                               # noqa: E402
 from amdgraph.store import Store                              # noqa: E402
@@ -171,6 +172,87 @@ class TestRendering:
     def test_height_is_fixed_so_the_column_lines_up(self, view, spec):
         p = ChartPane(spec, view)
         assert p.minimumHeight() == spec.height == p.maximumHeight()
+
+
+class TestPaneOwnedSettings:
+    """Both raster panes carry a setting that governs only themselves. Neither
+    has a toolbar widget any more, so the header shows the state and a menu on
+    the pane changes it -- which makes these the only route to either."""
+
+    @staticmethod
+    def open_menu(monkeypatch, widget, method):
+        """Capture the menu instead of running a modal exec()."""
+        from PyQt6.QtWidgets import QMenu
+        seen = {}
+
+        def fake_exec(self, *a, **k):
+            seen["actions"] = [(a.text(), a.isChecked(), a.isEnabled())
+                               for a in self.actions()]
+            seen["menu"] = self
+            return None
+
+        monkeypatch.setattr(QMenu, "exec", fake_exec)
+        method()
+        return seen
+
+    def test_core_menu_lists_every_mode_and_ticks_the_current_one(
+            self, view, monkeypatch):
+        c = CorePane(view)
+        c.set_mode(2)
+        seen = self.open_menu(monkeypatch, c, lambda: c._menu(QPoint(0, 0)))
+        labels = [t for t, _chk, en in seen["actions"] if en and t]
+        assert labels == [f"{n} ({u})" for _k, n, u, _l, _h in HEAT_MODES]
+        checked = [t for t, chk, en in seen["actions"] if chk]
+        name, unit = HEAT_MODES[2][1], HEAT_MODES[2][2]
+        assert checked == [f"{name} ({unit})"]
+
+    def test_choosing_a_mode_changes_the_pane(self, view, monkeypatch):
+        c = CorePane(view)
+        seen = self.open_menu(monkeypatch, c, lambda: c._menu(QPoint(0, 0)))
+        target = [a for a in seen["menu"].actions()
+                  if a.text() == f"{HEAT_MODES[3][1]} ({HEAT_MODES[3][2]})"]
+        target[0].trigger()
+        assert c.mode == 3
+
+    def test_throttle_menu_ticks_the_current_rate(self, view, monkeypatch):
+        t = ThrottlePane(view)
+        t.cap_hz = CAP_RATES[1][0]
+        seen = self.open_menu(monkeypatch, t, lambda: t._menu(QPoint(0, 0)))
+        assert [lbl for lbl, chk, _en in seen["actions"]
+                if chk] == [CAP_RATES[1][1]]
+
+    @pytest.mark.parametrize("kind", ["throttle", "core"])
+    def test_a_header_click_opens_the_menu(self, kind, view, monkeypatch):
+        w = make(kind, view)
+        opened = []
+        monkeypatch.setattr(type(w), "_menu",
+                            lambda self, at: opened.append(at))
+        press(w, 300, y=6)
+        release(w, 300, y=6)
+        assert opened, "clicking the header should offer the setting"
+
+    @pytest.mark.parametrize("kind", ["throttle", "core"])
+    def test_a_click_in_the_plot_area_does_not(self, kind, view, monkeypatch):
+        w = make(kind, view)
+        opened = []
+        monkeypatch.setattr(type(w), "_menu",
+                            lambda self, at: opened.append(at))
+        press(w, 300, y=TOP + 30)
+        release(w, 300, y=TOP + 30)
+        assert not opened
+
+    @pytest.mark.parametrize("kind", ["throttle", "core"])
+    def test_dragging_from_the_header_still_zooms(self, kind, view,
+                                                  monkeypatch):
+        """The header is a click target, not a dead zone."""
+        w = make(kind, view)
+        monkeypatch.setattr(type(w), "_menu", lambda self, at: None)
+        t_a, t_b = w.t_of(300), w.t_of(800)
+        press(w, 300, y=6)
+        move(w, 800, y=6)
+        release(w, 800, y=6)
+        assert view.t0 == pytest.approx(t_a)
+        assert view.t1 == pytest.approx(t_b)
 
 
 class TestInteraction:

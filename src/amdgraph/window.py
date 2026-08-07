@@ -24,8 +24,7 @@ from .axis import TimeAxis
 from .chart import ChartPane
 from .fields import N_CORES, THROTTLE_BITS
 from .palette import INK, MUTED, SURFACE
-from .panes import (GROUPS, HEAT_AFTER, HEAT_MODES, PANES,
-                    THROTTLE_FIRST)
+from .panes import GROUPS, HEAT_AFTER, PANES, THROTTLE_FIRST
 from .rasters import CorePane, ThrottlePane
 from .render import fmt_time
 from .sampler import Sampler
@@ -207,16 +206,9 @@ class Main(QMainWindow):
         # cycles in that header are meaningless without knowing it. It was a
         # set-once expert control occupying 110 px of permanent chrome.
 
-        h.addSpacing(10)
-        h.addWidget(QLabel("Cores"))
-        self.cb_heat = QComboBox()
-        # No unit in the item text: the pane's own header already reads
-        # "Per-core clock  (MHz)", and repeating it cost 50 px of combo width.
-        for _, name, _unit, _, _ in HEAT_MODES:
-            self.cb_heat.addItem(name)
-        self.cb_heat.currentIndexChanged.connect(
-            lambda i: self.heat.set_mode(i))
-        h.addWidget(self.cb_heat)
+        # The per-core metric selector went the same way as Cap poll: onto the
+        # pane it governs, which sits most of a screen below this toolbar and
+        # already names the current mode in its own header.
 
         h.addStretch(1)
 
