@@ -46,7 +46,9 @@ on `sys.path` and all three forms run.
    palette view         colours; the shared time window
 4  render               axis ranges, formatting, polylines, raster column-hold
 5  timepane             base: time projection + zoom/pan/crosshair gestures
+   frame                base: the widget chrome a painted body sits inside
    chart rasters axis   the three kinds of pane, and the ruler
+   section              the collapsible group header
 6  window  __main__     assembly; argparse and QApplication
 ```
 
@@ -54,9 +56,9 @@ The "no Qt below layer 2" rule is checked, not just stated. It means a
 recording can be produced or read headlessly, and it is why `--help` works on a
 machine with neither numpy nor PyQt6 installed.
 
-Two rules the numbering cannot express, both declared in the checker:
-`chart` and `rasters` may import `timepane` (their base class), each backend
-module may import `backends.base` (likewise), and `__main__` may import
+Some edges the numbering cannot express, all declared in the checker: `chart`
+and `rasters` may import `timepane` and `frame` (their base classes), each
+backend module may import `backends.base` (likewise), and `__main__` may import
 `window`.
 
 ## Data flow
@@ -146,10 +148,59 @@ with what caveat, and contains no drawing code; `ChartPane` turns one `PaneSpec`
 into pixels and knows nothing about what any key means. Adding a pane is an
 entry in the catalogue.
 
-Three widget kinds share `TimePane`, which owns the time↔pixel projection and
+### Widgets outside, painting inside
+
+Each pane is a `PaneFrame`: a header row of real Qt widgets above one
+custom-painted body.
+
+```
+PaneFrame (fixed height = spec.height)
+├── header (QWidget, QHBoxLayout)
+│   ├── QLabel     title
+│   ├── QComboBox  where the pane owns a setting
+│   ├── ElidedLabel  the note — yields its width to everything else
+│   └── Readout    live values at the crosshair (painted)
+└── body           grid, traces, gutters, cursor (painted)
+```
+
+The split is by *what the region does*. A title, a note and a control are
+chrome, and chrome is what widgets are for: the layout negotiates widths, a
+combo can be seen and tabbed to instead of hiding in a context menu, and text is
+text. Two things stay painted:
+
+- **the body**, because splitting the y-axis gutter into its own widget would
+  mean handing it the y-scale, which is computed during the body's own fit;
+- **the readout**, because four series across seventeen panes rewritten at
+  ~30 Hz while the pointer sweeps is around seventy label updates a frame, each
+  triggering layout, versus one `drawText` loop.
+
+Two consequences worth knowing. `spec.height` is the *whole row*, header
+included, so the body is sized to `spec.height - render.HEADER_H` and the fold
+arithmetic stays comparable across the change. And a frame can be indented —
+`PaneFrame(indent=n)`, used to show a section containing its panes — in which
+case the body subtracts the same `n` from its own left gutter, because every
+pane shares one time axis and a plot that moved would stop lining up with the
+ruler beneath it.
+
+The three bodies share `TimePane`, which owns the time↔pixel projection and
 every gesture (drag to zoom, wheel, middle-drag pan, crosshair). Before it
 existed those were copied three times and had already drifted — the selection
 band was drawn two different ways.
+
+Gestures are scoped to the plot, not the whole pane. The wheel only zooms over
+it (otherwise the event is ignored and scrolls the column, which is over two
+screens tall), and the crosshair only tracks over it (outside, the store has no
+sample at that time, so every readout would drop to `--`).
+
+### Geometry comes from the font
+
+Anything that has to hold text is sized from `QFontMetrics`, never from a
+constant. `render.calibrate()` runs once at startup, after a `QApplication`
+exists, and sets the gutters (`LEFT`, `RIGHT`), the body's insets (`TOP`,
+`BOTTOM`) and the header height from the fonts actually in use; the raster row
+heights and the axis height come from each widget's own metrics. Six separate
+clipping bugs came from constants tuned against one machine's font — see
+`CLAUDE.md`, which states the rule, and `DECISIONS.md` for the list.
 
 Two panes are rasters rather than line charts, because thirteen throttle reasons
 and eight cores are both far past where categorical colour stays separable. They

@@ -9,6 +9,70 @@ repeating it.
 
 ---
 
+### Every text box is sized from the font
+
+Six clipping defects, all the same shape — a pixel count tuned against one
+machine's font, on a program whose every font derives from the system default:
+
+| | held | needed |
+|---|---|---|
+| `LEFT` 72 | `PROCHOT CPU` | rendered as `ROCHOT CPU` |
+| `RIGHT` 104 | `amdgpu hwmon` | rendered as `amdgpu hwmor` |
+| note box 320 | the pane note | cut off mid-word |
+| `TOP` 2 | half a tick label | top label halved |
+| `ROW` 11 / 13 | the row's own label | a pixel short at the *smallest* font |
+| readout 120 | eight per-core values | four and a half of them |
+
+Only the first two were visible on the machine this was written on; the rest
+were latent and would have appeared on any larger desktop font. They are all
+derived now — see `DESIGN.md`. The rule is in `CLAUDE.md` because it will
+happen again otherwise.
+
+### Widget chrome, painted data
+
+A pane's header is real widgets and its body is painted. The dividing line is
+whether the region is *chrome* or *live data*: titles, notes and controls go to
+the layout, which negotiates widths far better than the hand-rolled
+measure-then-elide code it replaced; the plot and the crosshair readout stay
+painted, the readout because seventy label updates a frame at 30 Hz is not what
+`QLabel` is for.
+
+Rejected on the way: **QtCharts for the plots**. It would cost the per-column
+min/max decimation that preserves one-sample spikes, NaN-as-a-gap, the exact
+pixel agreement between seventeen panes and one shared axis, and the repaint
+budget (52 ms → ~1.7% of a core) — and the two raster strips have no equivalent
+and would stay hand-painted anyway. Plus a runtime dependency, against "apt
+install python3-pyqt6 and run".
+
+### Controls live on the thing they control
+
+The toolbar had twelve widgets and set the window's entire minimum width —
+1108 px of it. Four duplicated single-key shortcuts (Freeze, Reset, Follow, and
+Mark; only Mark survived, because `m` is not guessable). Two were modal
+companions greyed out most of the time. Two were per-pane settings sitting
+across the window from the pane they governed.
+
+Now: pane settings are combos in that pane's own header, next to the title they
+qualify; Overlay and Clear are one button that says which it is; Go live is
+hidden while live. What remains acts on the program, not on one pane. Minimum
+width 1108 → 433, and then → 222 once the toolbar became a real `QToolBar`,
+which overflows into a popup rather than refusing to shrink.
+
+### Collapsible sections, declared by title
+
+The pane column is about two screens tall, so what sits above the fold is a
+decision. `GROUPS` names a consecutive run of pane titles — declared by title
+rather than by nesting the specs, so `PANES` stays a flat catalogue readable in
+screen order — and the run collapses behind one header.
+
+Package power stays outside it: it carries most of the governing limits, so it
+is the second thing to look at after the cap reason, not detail. Collapsing the
+rest lifts both temperatures, the CPU clock and most of the per-core strip above
+the fold.
+
+A collapsed pane is hidden, not absent. It keeps its place and its store, so
+expanding one shows the history you did not watch being recorded.
+
 ### Panes are declarative, drawing is not
 
 `panes.py` lists what is plotted with no drawing code; `ChartPane` renders a

@@ -33,6 +33,22 @@ you measure something, account for every writer before attributing a change to
 firmware — a `watch ryzenadj` loop in another terminal has already been mistaken
 for the platform once.
 
+**A pixel count that holds text is a bug — measure the font.** Every widget
+font here derives from the system default, so it scales with the desktop's font
+size and with DPI, and any constant tuned against one machine is wrong on the
+next. This has now produced six defects: clipped row labels (`PROCHOT CPU` →
+`ROCHOT CPU`), a truncated end label, a note cut off mid-word, a halved top
+tick label, two raster row heights a pixel shorter than their own text, and a
+readout pinned at a minimum that fitted four of eight values.
+
+If a box has to hold text, its size comes from `QFontMetrics` — via
+`render.calibrate()` for anything shared between panes, or from the widget's
+own metrics otherwise. If two widgets compete for a row, say which one yields;
+Qt will otherwise starve whichever asks last. And read shared geometry as
+`render.LEFT`, never `from .render import LEFT`: `calibrate()` replaces those
+at startup and a from-import binds the stale value, which will make your fix
+appear to do nothing.
+
 **Put the evidence next to the claim.** A comment asserting what a field means
 must say how that was established. The comments in `src/amdgraph/fields.py` are
 the most valuable thing in the tree; they are why the Phoenix map is trustworthy
@@ -55,6 +71,12 @@ For GUI changes, assert behaviour that is portable: geometry, exact view state
 after a gesture, that a pane paints without raising. Do not add golden pixel
 hashes. For a refactor, hash renders against the previous commit in a scratch
 script and throw it away.
+
+Anything font-dependent gets tested across a range of sizes, and the test must
+set the **application** font — `QApplication.instance().setFont(...)` — because
+that is what `pane_font()` reads. Passing a font only to `calibrate()` leaves
+the panes building themselves at the default size, and the test passes without
+exercising anything; that mistake nearly shipped.
 
 ## Conventions
 
