@@ -20,6 +20,7 @@ PM_VERSION = "/sys/kernel/ryzen_smu_drv/pm_table_version"
 # Other table versions place these elsewhere, so we decode nothing but this one
 # rather than print plausible garbage.
 PM_VER_SUPPORTED = 0x004C0009
+PM_HALO_VER_SUPPORTED = 0x0064020C
 
 PM_SCALAR = {
     # key                index  scale
@@ -92,6 +93,59 @@ PM_CORE = {
     "core_freqeff": (561,  1000.0),   # GHz -> MHz, gating-averaged
     "core_c0":      (569,  1.0),
     "core_cc6":     (585,  1.0),
+}
+
+# Strix Halo pm_table 0x0064020C, measured on a Ryzen AI MAX+ 395.
+#
+# This is deliberately narrower than RyzenAdj's candidate map. Eight captures
+# (idle; 1, 8 and 16 CPU cores; memory; GPU; mixed CPU/GPU) at 4 Hz supplied
+# independent references from gpu_metrics_v3_0, cpufreq, k10temp and Linux
+# cpuidle counters:
+#
+# * package values 3/5 correlate +0.972/+0.938 with gpu_metrics socket power;
+# * loading CPUs 0-7 then 8-15 separates cluster temperatures 19/21. 23/25
+#   agree with amdgpu GFX/SoC temperature, each after its 100 C ceiling;
+# * core power at 740 correlates +0.956 with gpu_metrics (per-core
+#   +0.891..+0.978); clock at 788 correlates +0.830 after GHz -> MHz;
+# * C0 at 820 correlates +0.975 with gpu_metrics. 820+836+852 sums to 100.00%
+#   (99.9999..100.934 observed); 836 follows Linux's shallow C2 idle counter
+#   (+0.882) and 852 its deep C3 counter (+0.744), establishing C1/core-C6;
+# * voltage at 756 is 0.666..1.309 V, rises only on selectively loaded cores,
+#   and power / voltage predicts the separate current block at 932 with
+#   correlation +0.959 and median scale 0.956.
+#
+# Unlisted fields were not earned. The apparent current limits and late fabric
+# blocks remain unnamed despite plausible accessors elsewhere.
+PM_HALO_SCALAR = {
+    "stapm":            (1,     1.0),
+    "stapm_lim":        (0,     1.0),
+    "ppt_fast":         (3,     1.0),
+    "ppt_fast_lim":     (2,     1.0),
+    "ppt_slow":         (5,     1.0),
+    "ppt_slow_lim":     (4,     1.0),
+    "thm_core0":        (19,    1.0),
+    "thm_core0_lim":    (18,    1.0),
+    "thm_core1":        (21,    1.0),
+    "thm_core1_lim":    (20,    1.0),
+    "thm_gfx":          (23,    1.0),
+    "thm_gfx_lim":      (22,    1.0),
+    "thm_soc":          (25,    1.0),
+    "thm_soc_lim":      (24,    1.0),
+}
+
+PM_HALO_CORE = {
+    "core_power":   (740,  1.0),
+    "core_volt":    (756,  1.0),
+    "core_temp":    (772,  1.0),
+    "core_freq":    (788,  1000.0),
+    "core_c0":      (820,  1.0),
+    "core_c1":      (836,  1.0),
+    "core_cc6":     (852,  1.0),
+}
+
+PM_PROFILES = {
+    PM_VER_SUPPORTED: (PM_SCALAR, PM_CORE, 8),
+    PM_HALO_VER_SUPPORTED: (PM_HALO_SCALAR, PM_HALO_CORE, 16),
 }
 # The rendering/storage ceiling. gpu_metrics_v3_0, used by Strix Point and
 # Strix Halo, publishes sixteen physical cores. Older backends simply omit the

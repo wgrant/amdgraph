@@ -10,7 +10,8 @@ from conftest import pm_blob
 
 from amdgraph import fields
 from amdgraph.backends import zen_smu
-from amdgraph.fields import N_CORES, PM_VER_SUPPORTED
+from amdgraph.fields import (N_CORES, PM_HALO_VER_SUPPORTED, PM_PROFILES,
+                             PM_VER_SUPPORTED)
 from amdgraph.sysfs import RealFS
 
 
@@ -48,6 +49,36 @@ class TestPmDecode:
         assert s["stapm_head"] == pytest.approx(10.0)
         assert s["ppt_slow_head"] == pytest.approx(1.0)
 
+    def test_strix_halo_scalars_cores_residency_and_derived_values(
+            self, tmp_path, monkeypatch):
+        values = {
+            0: 100.0, 1: 42.0, 2: 115.0, 3: 70.0, 4: 100.0, 5: 60.0,
+            18: 100.0, 19: 72.0, 20: 95.0, 21: 75.0,
+            22: 90.0, 23: 50.0, 24: 85.0, 25: 48.0,
+        }
+        for i in range(N_CORES):
+            values.update({740 + i: i + 1.0, 756 + i: 1.0,
+                           772 + i: 40.0 + i, 788 + i: 4.0,
+                           820 + i: 25.0, 836 + i: 15.0,
+                           852 + i: 60.0})
+        p = tmp_path / "pm_table"
+        p.write_bytes(pm_blob(values, size=1034))
+        monkeypatch.setattr(zen_smu, "PM_TABLE", str(p))
+        s = {}
+        zen_smu.ZenSmuBackend(PM_HALO_VER_SUPPORTED).sample(s, RealFS())
+        assert s["stapm"] == 42.0
+        assert s["ppt_fast_lim"] == 115.0
+        assert s["tctl"] == 75.0
+        assert s["tctl_lim"] == 95.0
+        assert s["thm_gfx"] == 50.0 and s["thm_gfx_lim"] == 90.0
+        assert s["core_power_sum"] == pytest.approx(136.0)
+        assert s["core_temp_15"] == 55.0
+        assert s["core_freq_0"] == 4000.0
+        assert s["core_c1_15"] == 15.0
+        assert s["core_cc6_15"] == 60.0
+        assert s["core_freqeff_mean"] == 1000.0
+        assert s["ppt_fast_head"] == 45.0
+
 
 class TestProbe:
     def test_missing_driver_reports_and_declines(self, tmp_path, monkeypatch):
@@ -65,18 +96,21 @@ class TestProbe:
         assert backend is None
         assert "0xdeadbeef" in note
 
-    def test_supported_version_is_accepted(self, tmp_path, monkeypatch):
+    @pytest.mark.parametrize("version", [PM_VER_SUPPORTED,
+                                          PM_HALO_VER_SUPPORTED])
+    def test_supported_version_is_accepted(self, tmp_path, monkeypatch,
+                                           version):
         p = tmp_path / "pm_table_version"
-        p.write_bytes(PM_VER_SUPPORTED.to_bytes(4, "little"))
+        p.write_bytes(version.to_bytes(4, "little"))
         monkeypatch.setattr(zen_smu, "PM_VERSION", str(p))
         backend, note = zen_smu.probe(RealFS())
         assert isinstance(backend, zen_smu.ZenSmuBackend)
         assert note == ""
-        assert backend.meta() == {"pm_table_version": "0x004c0009"}
+        assert backend.meta() == {"pm_table_version": f"{version:#010x}"}
 
 
 def test_supported_versions_are_the_verified_ones():
     """Bumping either of these without re-validating the field map is the
     mistake this whole program is arranged to prevent."""
-    assert PM_VER_SUPPORTED == 0x004C0009
+    assert set(PM_PROFILES) == {0x004C0009, 0x0064020C}
     assert (fields.GM_VERSION, fields.GM_SIZE) == ((2, 1), 120)

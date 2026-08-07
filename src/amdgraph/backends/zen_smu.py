@@ -1,27 +1,24 @@
 """Layer 1 -- the SMU's pm_table, via ryzen_smu.
 
-Sensor layouts are part-specific and undocumented, so this decodes only what
-has been checked against live silicon: pm_table 0x004C0009, as found on
-Ryzen 7040-series (Phoenix). See docs/HARDWARE.md for what adding a part
-involves and fields.py for the evidence behind every index below.
-
-Deliberately single-version, not a registry: there is no second verified map
-yet, and building one now for a table that has not been captured would be
-exactly the kind of invented number this module exists to refuse. Adding a
-second platform's map is a small, obvious extension to this same shape once
-it has been earned the same way this one was.
+Sensor layouts are part-specific and undocumented, so this decodes only maps
+checked against live silicon: Phoenix 0x004C0009 and Strix Halo 0x0064020C.
+See fields.py for the evidence behind every index and docs/HARDWARE.md for what
+adding another part involves.
 
 May import: fields, sysfs, backends.base.
 """
 
 import struct
 
-from ..fields import (PHOENIX_CORES, PM_CORE, PM_SCALAR, PM_TABLE, PM_VERSION,
-                     PM_VER_SUPPORTED)
+from ..fields import PM_PROFILES, PM_TABLE, PM_VERSION, PM_VER_SUPPORTED
 from .base import Backend
 
 
 class ZenSmuBackend(Backend):
+    def __init__(self, version=PM_VER_SUPPORTED):
+        self.version = version
+        self.scalars, self.cores, self.ncores = PM_PROFILES[version]
+
     def sample(self, s, fs):
         raw = fs.read_bytes(PM_TABLE)
         if raw is None:
@@ -29,7 +26,7 @@ class ZenSmuBackend(Backend):
         n = len(raw) // 4
         v = struct.unpack(f"<{n}f", raw[:n * 4])
 
-        for key, (idx, scale) in PM_SCALAR.items():
+        for key, (idx, scale) in self.scalars.items():
             if idx < n:
                 s[key] = v[idx] * scale
 
@@ -37,8 +34,8 @@ class ZenSmuBackend(Backend):
         # and the mean are both worth having: the gap between them is how
         # unevenly the scheduler is spreading load, which changes what the
         # power budget buys you.
-        for base_key, (base, scale) in PM_CORE.items():
-            vals = [v[base + i] * scale for i in range(PHOENIX_CORES)
+        for base_key, (base, scale) in self.cores.items():
+            vals = [v[base + i] * scale for i in range(self.ncores)
                     if base + i < n]
             if not vals:
                 continue
@@ -47,7 +44,31 @@ class ZenSmuBackend(Backend):
             s[f"{base_key}_mean"] = sum(vals) / len(vals)
             s[f"{base_key}_max"] = max(vals)
         if "core_power_mean" in s:
-            s["core_power_sum"] = s["core_power_mean"] * PHOENIX_CORES
+            s["core_power_sum"] = s["core_power_mean"] * self.ncores
+
+        if self.version != PM_VER_SUPPORTED:
+            # Strix Halo reports one thermal value per eight-core cluster. The
+            # governing CPU temperature is the hotter cluster; its conservative
+            # ceiling is the lower of their two limits.
+            temps = [s[k] for k in ("thm_core0", "thm_core1") if k in s]
+            limits = [s[k] for k in ("thm_core0_lim", "thm_core1_lim")
+                      if k in s]
+            if temps:
+                s["tctl"] = max(temps)
+            if limits:
+                s["tctl_lim"] = min(limits)
+            # Frequency times C0 residency is the interval's useful clock;
+            # both inputs carry the same SMU time filter.
+            effective = []
+            for i in range(self.ncores):
+                freq, c0 = s.get(f"core_freq_{i}"), s.get(f"core_c0_{i}")
+                if freq is not None and c0 is not None:
+                    value = freq * c0 / 100.0
+                    s[f"core_freqeff_{i}"] = value
+                    effective.append(value)
+            if effective:
+                s["core_freqeff_mean"] = sum(effective) / len(effective)
+                s["core_freqeff_max"] = max(effective)
 
         # Unused budget: limit minus value. This is the signal that
         # separates "throttled because it ran out of power" from "held down
@@ -66,7 +87,7 @@ class ZenSmuBackend(Backend):
         """A recording is only interpretable against the layout it was taken
         with, so the version goes in the file rather than being assumed at
         read time."""
-        return {"pm_table_version": f"{PM_VER_SUPPORTED:#010x}"}
+        return {"pm_table_version": f"{self.version:#010x}"}
 
 
 def probe(fs):
@@ -78,8 +99,9 @@ def probe(fs):
     if ver is None:
         return None, ("ryzen_smu not loaded -- SMU panes are empty. "
                       "modprobe ryzen_smu to populate them.")
-    if ver != PM_VER_SUPPORTED:
+    if ver not in PM_PROFILES:
+        supported = ", ".join(f"{v:#010x}" for v in PM_PROFILES)
         return None, (f"pm_table version {ver:#010x} is not decoded "
-                      f"(this build maps {PM_VER_SUPPORTED:#010x}) -- "
+                      f"(this build maps {supported}) -- "
                       "pm_table-only series are empty.")
-    return ZenSmuBackend(), ""
+    return ZenSmuBackend(ver), ""

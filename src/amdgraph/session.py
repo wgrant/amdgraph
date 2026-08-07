@@ -12,7 +12,7 @@ import os
 
 import numpy as np
 
-from .fields import N_CORES, PM_CORE, PM_SCALAR, THROTTLE_BITS
+from .fields import N_CORES, PM_PROFILES, THROTTLE_BITS
 from .store import Store
 
 DATA_DIR = os.path.join(
@@ -24,8 +24,11 @@ def record_keys():
     """Record every key the sampler can produce, not just the plotted ones --
     a recording you have to re-take because you did not log the column you now
     want is worse than a slightly larger file."""
-    keys = list(PM_SCALAR)
-    for base in PM_CORE:
+    keys, core_bases = [], []
+    for scalars, cores, _ncores in PM_PROFILES.values():
+        keys += list(scalars)
+        core_bases += list(cores)
+    for base in dict.fromkeys(core_bases):
         keys += [f"{base}_{i}" for i in range(N_CORES)]
         keys += [f"{base}_mean", f"{base}_max"]
     keys += ["throttle_raw", "throttle_n", "pwr_socket",

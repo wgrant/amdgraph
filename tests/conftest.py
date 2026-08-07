@@ -104,12 +104,12 @@ def gm3_blob(residencies=(0,) * 7):
     return bytes(b)
 
 
-def pm_blob(values):
-    """A 704-float pm_table with the given indices set."""
-    a = [0.0] * 704
+def pm_blob(values, size=704):
+    """A pm_table of the chosen float width with the given indices set."""
+    a = [0.0] * size
     for i, v in values.items():
         a[i] = v
-    return struct.pack("<704f", *a)
+    return struct.pack(f"<{size}f", *a)
 
 
 @pytest.fixture
