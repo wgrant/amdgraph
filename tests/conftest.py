@@ -110,3 +110,77 @@ def view(store):
     v.window = 300.0
     v.update_range()
     return v
+
+
+# -- a source with no hardware behind it -----------------------------------
+
+class FakeSource:
+    """Implements Sampler's protocol and reads nothing.
+
+    This is the whole point of the protocol existing: the window can be built
+    and driven on a machine with no AMD part in it, and a second platform's
+    backend is a class like this one with real reads behind it rather than a
+    change to the window.
+    """
+
+    def __init__(self, notes=(), meta=None, keys=("stapm", "tctl", "thr0")):
+        self._notes = list(notes)
+        self._meta = dict(meta or {"pm_table_version": "0x004c0009"})
+        self._keys = keys
+        self.ticks = 0
+        self.resets = 0
+        self.closed = 0
+        self.cap_rates = []
+
+    def sample(self):
+        self.ticks += 1
+        # Deterministic and distinguishable per tick, so a test can tell which
+        # sample landed where.
+        return {k: float(self.ticks * 10 + i)
+                for i, k in enumerate(self._keys)}
+
+    def notes(self):
+        return list(self._notes)
+
+    def meta(self):
+        return dict(self._meta)
+
+    def set_cap_rate(self, hz):
+        self.cap_rates.append(hz)
+
+    def reset(self):
+        self.resets += 1
+
+    def close(self):
+        self.closed += 1
+
+
+@pytest.fixture
+def source():
+    return FakeSource()
+
+
+@pytest.fixture
+def main(qapp, source, tmp_path, monkeypatch):
+    """A real Main over a fake source, with every modal neutered.
+
+    A blocking dialog in a headless test is not a failure, it is a hang -- one
+    already cost this project a stray process at 96% of a core for 36 minutes.
+    """
+    from PyQt6.QtWidgets import QInputDialog, QMessageBox
+
+    from amdgraph import window as W
+
+    # Never write to the user's real recordings directory.
+    monkeypatch.setattr(W, "DATA_DIR", str(tmp_path / "recordings"))
+    warned = []
+    monkeypatch.setattr(QMessageBox, "warning",
+                        staticmethod(lambda *a, **k: warned.append(a[-1])))
+    monkeypatch.setattr(QInputDialog, "getText",
+                        staticmethod(lambda *a, **k: ("a marker", True)))
+
+    w = W.Main(interval=0.5, source=source)
+    w.timer.stop()               # tests drive tick() by hand
+    w.warned = warned
+    yield w
+    w.close()

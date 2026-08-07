@@ -21,25 +21,28 @@ from PyQt6.QtWidgets import (QComboBox, QFileDialog, QHBoxLayout,
 
 from .axis import TimeAxis
 from .chart import ChartPane
-from .fields import PM_VER_SUPPORTED
 from .palette import INK, MUTED, SURFACE
 from .panes import (CAP_DEFAULT, CAP_RATES, HEAT_AFTER, HEAT_MODES, PANES,
                     THROTTLE_FIRST)
 from .rasters import CorePane, ThrottlePane
 from .render import fmt_time
-from .sampler import CPUBusy, Sampler
+from .sampler import Sampler
 from .session import DATA_DIR, Recorder, load_session, record_keys
 from .store import Store
 from .view import View
 
 
 class Main(QMainWindow):
-    def __init__(self, interval, open_path=None):
+    def __init__(self, interval, open_path=None, source=None):
+        """`source` is anything implementing Sampler's protocol; it defaults to
+        reading this machine. Injecting it is what lets the window be built and
+        driven with no hardware present, and is the seam a second platform's
+        backend plugs into."""
         super().__init__()
         self.setWindowTitle("amdgraph")
         self.resize(1180, 900)
         self.interval = interval
-        self.sampler = Sampler()
+        self.sampler = source if source is not None else Sampler()
         self.store = Store()
         self.view = View(self.store)
         self.view.window = 300.0
@@ -97,7 +100,7 @@ class Main(QMainWindow):
 
         self._install_shortcuts()
 
-        notes = [n for n in (self.sampler.pm_note, self.sampler.gm_note) if n]
+        notes = self.sampler.notes()
         if notes:
             self.status.setText("   ·   ".join(notes))
 
@@ -281,9 +284,7 @@ class Main(QMainWindow):
             bits.append(f"recording → {self.recorder.path}")
         if self.view.overlay is not None:
             bits.append(f"overlay: {self.view.overlay_name}")
-        for note in (self.sampler.pm_note, self.sampler.gm_note):
-            if note:
-                bits.append(note)
+        bits.extend(self.sampler.notes())
         self.status.setText("   ·   ".join(bits))
 
     # -- handlers ---------------------------------------------------------
@@ -317,7 +318,7 @@ class Main(QMainWindow):
         live buffer is a separate store from the one being viewed."""
         self.store = Store()
         self.t_start = time.monotonic()
-        self.sampler.cpubusy = CPUBusy()
+        self.sampler.reset()
         if self.live:
             self.view.store = self.store
             self.view.markers = []
@@ -348,8 +349,7 @@ class Main(QMainWindow):
                     "started": datetime.now().astimezone().isoformat(),
                     "host": socket.gethostname(),
                     "interval": f"{self.interval:g}",
-                    "pm_table_version": (f"{PM_VER_SUPPORTED:#010x}"
-                                         if self.sampler.pm_ok else "none"),
+                    **self.sampler.meta(),
                 }
                 self.recorder = Recorder(path, record_keys(), meta)
             except OSError as e:
@@ -400,7 +400,7 @@ class Main(QMainWindow):
         self.refresh()
 
     def on_cap_rate(self, i):
-        self.sampler.throttle.set_rate(CAP_RATES[i][0])
+        self.sampler.set_cap_rate(CAP_RATES[i][0])
         self.refresh()
 
     def on_clear_overlay(self):
@@ -446,7 +446,10 @@ class Main(QMainWindow):
         self.refresh()
 
     def closeEvent(self, ev):
+        # Qt can deliver this more than once -- an explicit close() followed by
+        # the application quitting, say -- so it has to be safe to repeat.
         if self.recorder:
             self.recorder.close()
-        self.sampler.throttle.stop()
+            self.recorder = None
+        self.sampler.close()
         super().closeEvent(ev)

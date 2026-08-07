@@ -208,6 +208,15 @@ class TestSession:
         with pytest.raises(ValueError):
             load_session(str(p))
 
+    def test_close_is_idempotent(self, tmp_path):
+        """flush() on an already-closed file raises ValueError, not OSError,
+        and the second close arrives from a Qt virtual override where an
+        exception aborts the process."""
+        rec = Recorder(str(tmp_path / "s.csv"), ["a"], {})
+        rec.write(0.0, {"a": 1.0})
+        rec.close()
+        rec.close()                            # must not raise
+
     def test_record_keys_are_unique(self):
         keys = record_keys()
         assert len(keys) == len(set(keys))

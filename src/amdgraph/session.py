@@ -81,10 +81,16 @@ class Recorder:
             self.f.flush()
 
     def close(self):
+        """Idempotent. Closing twice used to raise ValueError -- flush() on an
+        already-closed file is not an OSError -- and the second close arrives
+        from a Qt virtual override, where an exception aborts the process
+        rather than propagating."""
+        if self.f.closed:
+            return
         try:
             self.f.flush()
             self.f.close()
-        except OSError:
+        except (OSError, ValueError):
             pass
 
 

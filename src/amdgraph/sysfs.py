@@ -24,13 +24,36 @@ def read_num(path, scale=1.0):
         return None
 
 
-def find_hwmon():
+HWMON = "/sys/class/hwmon"
+
+
+def trailing_index(name):
+    """Sort key that reads hwmon7 / card10 as numbers, not as strings.
+
+    Plain sorting puts card10 and hwmon10 ahead of card2 and hwmon2.
+    """
+    digits = "".join(c for c in name if c.isdigit())
+    return (int(digits) if digits else 1 << 30), name
+
+
+def find_hwmon(base=HWMON):
     """Map hwmon driver name -> sysfs dir. Indices move across boots, so this
-    has to be done by name at startup rather than hardcoded."""
+    has to be done by name at startup rather than hardcoded.
+
+    Names are not unique -- two NVMe drives both register as `nvme` -- and the
+    first one found wins. Which one that is has to be decided by something, so
+    the listing is sorted: without it the winner came from os.listdir order,
+    which is whatever the filesystem hands back, and the drive whose
+    temperature you were plotting could change between runs of the program.
+    Lowest index wins, which at least matches how they are numbered.
+
+    `base` is a parameter so this can be pointed at a synthetic tree; a reader
+    whose root is a literal cannot be tested anywhere but the machine it was
+    written on.
+    """
     out = {}
-    base = "/sys/class/hwmon"
     try:
-        for h in os.listdir(base):
+        for h in sorted(os.listdir(base), key=trailing_index):
             name = read_text(f"{base}/{h}/name")
             if name:
                 out.setdefault(name, f"{base}/{h}")
@@ -40,15 +63,8 @@ def find_hwmon():
 
 
 def card_index(dev):
-    """Sort key for a DRM device path: the card number, as a number.
-
-    Plain sorted() is lexicographic, which puts card10 before card2. Only the
-    fallback path below depends on the order, but a tie-break that reorders
-    itself once a machine reaches ten DRM nodes is not a tie-break.
-    """
-    name = os.path.basename(os.path.dirname(dev))
-    digits = "".join(c for c in name if c.isdigit())
-    return (int(digits) if digits else 1 << 30), dev
+    """Sort key for a DRM device path: the card number, as a number."""
+    return trailing_index(os.path.basename(os.path.dirname(dev)))
 
 
 def find_drm_device(pattern, vendor, validate):

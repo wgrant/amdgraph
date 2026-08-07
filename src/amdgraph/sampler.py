@@ -152,6 +152,24 @@ class Sampler:
     Deliberately open/read/close per attribute rather than holding descriptors
     open: a few dozen sysfs reads cost well under a millisecond, and some sysfs
     attributes do not survive being re-read from a held fd.
+
+    This is also *the source protocol*: the only surface the window is allowed
+    to use, so that a second one can exist. Everything above layer 1 goes
+    through these six methods and touches no attribute directly:
+
+        sample()        -> dict of key -> float, one tick's worth
+        notes()         -> list of strings for the status bar, "" filtered out
+        meta()          -> dict folded into a recording's header comments
+        set_cap_rate(hz)-> change how often the cap-reason source is polled
+        reset()         -> forget any differencing state; the buffer was cleared
+        close()         -> stop background threads
+
+    The window used to reach past all of this -- reassigning `sampler.cpubusy`
+    to reset the /proc/stat differ, and calling `sampler.throttle.set_rate()`
+    and `.stop()` directly. That made Main untestable without real hardware and
+    would have made a Renoir or Strix Halo backend a rewrite of the window
+    rather than a new class. Anything that is specific to how *this* part is
+    read belongs behind these methods.
     """
 
     # Reading the NVMe composite temperature costs ~1.9 ms here, because it is
@@ -374,6 +392,33 @@ class Sampler:
         # ~0.5 ms, an order of magnitude dearer than its neighbours.
         s["ac_online"] = self._slow("ac", "/sys/class/power_supply/AC/online")
         return s
+
+    # -- the source protocol ----------------------------------------------
+
+    def notes(self):
+        """What could not be read, and why, for the status bar."""
+        return [n for n in (self.pm_note, self.gm_note) if n]
+
+    def meta(self):
+        """Source-specific header fields for a recording.
+
+        A recording is only interpretable against the layout it was taken
+        with, so the version goes in the file rather than being assumed at
+        read time.
+        """
+        return {"pm_table_version": (f"{PM_VER_SUPPORTED:#010x}"
+                                     if self.pm_ok else "none")}
+
+    def set_cap_rate(self, hz):
+        self.throttle.set_rate(hz)
+
+    def reset(self):
+        """Drop differencing state. Called when the buffer is cleared, so the
+        first sample afterwards is not a delta against a stale baseline."""
+        self.cpubusy = CPUBusy()
+
+    def close(self):
+        self.throttle.stop()
 
     @staticmethod
     def _fan_command(tp):

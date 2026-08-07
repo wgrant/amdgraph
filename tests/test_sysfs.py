@@ -9,7 +9,8 @@ import pytest
 from conftest import gm_blob
 
 from amdgraph.sampler import Sampler
-from amdgraph.sysfs import card_index, find_drm_device, read_num, read_text
+from amdgraph.sysfs import (card_index, dpm_current, find_drm_device,
+                            find_hwmon, read_num, read_text)
 
 AMD, INTEL = "0x1002", "0x8086"
 V1_X = dict(fmt_rev=1, cont_rev=3, size=160)      # a discrete Radeon
@@ -102,6 +103,65 @@ def test_card_index_is_numeric_not_lexicographic():
     paths = [f"/sys/class/drm/card{n}/device" for n in (2, 10, 1)]
     got = [p.split("/")[-2] for p in sorted(paths, key=card_index)]
     assert got == ["card1", "card2", "card10"]
+
+
+class TestFindHwmon:
+    @pytest.fixture
+    def hwmon(self, tmp_path):
+        def build(**names):
+            base = tmp_path / "hwmon"
+            base.mkdir(exist_ok=True)
+            for dirname, name in names.items():
+                d = base / dirname
+                d.mkdir()
+                if name is not None:
+                    (d / "name").write_text(name + "\n")
+            return find_hwmon(str(base))
+        return build
+
+    def test_maps_name_to_directory(self, hwmon):
+        got = hwmon(hwmon0="amdgpu", hwmon1="thinkpad", hwmon2="nvme")
+        assert set(got) == {"amdgpu", "thinkpad", "nvme"}
+        assert got["thinkpad"].endswith("hwmon1")
+
+    def test_a_directory_with_no_name_is_skipped(self, hwmon):
+        got = hwmon(hwmon0=None, hwmon1="amdgpu")
+        assert list(got) == ["amdgpu"]
+        assert got["amdgpu"].endswith("hwmon1")
+
+    def test_lowest_index_wins_when_a_name_repeats(self, hwmon):
+        """Two NVMe drives both register as `nvme`. Which one is plotted has to
+        be decided by something: before the listing was sorted it came from
+        os.listdir order, so it could differ between runs."""
+        got = hwmon(hwmon2="nvme", hwmon0="nvme", hwmon1="amdgpu")
+        assert got["nvme"].endswith("hwmon0")
+
+    def test_double_digit_indices_sort_numerically(self, hwmon):
+        got = hwmon(hwmon10="nvme", hwmon2="nvme")
+        assert got["nvme"].endswith("hwmon2")
+
+    def test_absent_base_is_empty_not_an_error(self):
+        assert find_hwmon("/sys/definitely/not/here") == {}
+
+
+class TestDpmCurrent:
+    def write(self, tmp_path, text):
+        p = tmp_path / "pp_dpm_sclk"
+        p.write_text(text)
+        return str(p)
+
+    def test_reads_the_starred_level(self, tmp_path):
+        p = self.write(tmp_path, "0: 200Mhz\n1: 800Mhz *\n2: 2700Mhz\n")
+        assert dpm_current(p) == 800.0
+
+    def test_no_star_is_none(self, tmp_path):
+        assert dpm_current(self.write(tmp_path, "0: 200Mhz\n")) is None
+
+    def test_absent_file_is_none(self):
+        assert dpm_current("/sys/definitely/not/here") is None
+
+    def test_malformed_line_is_none(self, tmp_path):
+        assert dpm_current(self.write(tmp_path, "*\n")) is None
 
 
 def test_missing_paths_are_none():

@@ -194,6 +194,30 @@ nobody verified, so the tests asserting that it *refuses* — v2_2, v2_4, v3_0,
 v1_3, right version wrong size, truncated, absent — carry more weight than any
 that check a decode.
 
+### The source protocol
+
+`Main` takes a `source=` and uses exactly six methods of it — `sample()`,
+`notes()`, `meta()`, `set_cap_rate()`, `reset()`, `close()`. `Sampler` is the
+one that reads this machine; the tests pass a fake, which is why the window has
+coverage at all. Anything specific to how a *particular* part is read belongs
+behind those six methods, so a Renoir or Strix Halo backend is a new class
+rather than an edit to the window.
+
+Coverage, for orientation rather than as a target:
+
+| layer | |
+|---|---|
+| `sysfs` `fields` `palette` `panes` `axis` | 100% |
+| `render` `store` `view` `rasters` `window` | 92–98% |
+| `session` `chart` `timepane` | 91–93% |
+| `sampler` | 44% — the part that reads real sysfs |
+| `__main__` | 0% by coverage; exercised as a subprocess in `test_cli.py` |
+
+`sampler` is the honest floor: everything below it that can be faked has been,
+and what remains is the code that opens `/sys` directly. Making *that* testable
+means giving the readers an injectable root, which is the same change a second
+platform needs.
+
 There are deliberately no golden pixel hashes. Pane rendering draws text, so a
 hash fingerprints the font stack as much as the code, and a golden file that
 breaks on a Qt upgrade gets deleted rather than investigated. What is asserted
