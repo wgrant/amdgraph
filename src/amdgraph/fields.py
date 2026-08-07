@@ -107,6 +107,10 @@ PM_CORE = {
 #   agree with amdgpu GFX/SoC temperature, each after its 100 C ceiling;
 # * core power at 740 correlates +0.956 with gpu_metrics (per-core
 #   +0.891..+0.978); clock at 788 correlates +0.830 after GHz -> MHz;
+# * a separate prior-session workload series identified 804 as the sampled /
+#   effective-clock array: it falls near zero for sleeping cores while 788
+#   continues to report their requested/current P-state.  The live full-size
+#   table contains all sixteen entries and reports them in GHz;
 # * C0 at 820 correlates +0.975 with gpu_metrics. 820+836+852 sums to 100.00%
 #   (99.9999..100.934 observed); 836 follows Linux's shallow C2 idle counter
 #   (+0.882) and 852 its deep C3 counter (+0.744), establishing C1/core-C6;
@@ -138,6 +142,7 @@ PM_HALO_CORE = {
     "core_volt":    (756,  1.0),
     "core_temp":    (772,  1.0),
     "core_freq":    (788,  1000.0),
+    "core_freqeff": (804,  1000.0),
     "core_c0":      (820,  1.0),
     "core_c1":      (836,  1.0),
     "core_cc6":     (852,  1.0),

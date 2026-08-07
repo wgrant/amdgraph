@@ -59,6 +59,7 @@ class TestPmDecode:
         for i in range(N_CORES):
             values.update({740 + i: i + 1.0, 756 + i: 1.0,
                            772 + i: 40.0 + i, 788 + i: 4.0,
+                           804 + i: 0.75,
                            820 + i: 25.0, 836 + i: 15.0,
                            852 + i: 60.0})
         p = tmp_path / "pm_table"
@@ -76,7 +77,7 @@ class TestPmDecode:
         assert s["core_freq_0"] == 4000.0
         assert s["core_c1_15"] == 15.0
         assert s["core_cc6_15"] == 60.0
-        assert s["core_freqeff_mean"] == 1000.0
+        assert s["core_freqeff_mean"] == 750.0
         assert s["ppt_fast_head"] == 45.0
 
 

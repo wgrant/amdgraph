@@ -57,19 +57,6 @@ class ZenSmuBackend(Backend):
                 s["tctl"] = max(temps)
             if limits:
                 s["tctl_lim"] = min(limits)
-            # Frequency times C0 residency is the interval's useful clock;
-            # both inputs carry the same SMU time filter.
-            effective = []
-            for i in range(self.ncores):
-                freq, c0 = s.get(f"core_freq_{i}"), s.get(f"core_c0_{i}")
-                if freq is not None and c0 is not None:
-                    value = freq * c0 / 100.0
-                    s[f"core_freqeff_{i}"] = value
-                    effective.append(value)
-            if effective:
-                s["core_freqeff_mean"] = sum(effective) / len(effective)
-                s["core_freqeff_max"] = max(effective)
-
         # Unused budget: limit minus value. This is the signal that
         # separates "throttled because it ran out of power" from "held down
         # by something else entirely". Near zero means the power governor is
