@@ -25,7 +25,7 @@ from .axis import TimeAxis
 from .chart import chart_frame
 from .fields import MAX_CORE_SLOTS, THROTTLE_BITS
 from .palette import INK, MUTED, SURFACE
-from .panes import HEAT_AFTER, PANES, THROTTLE_FIRST, available_catalogue
+from .panes import HEAT_AFTER_ID, PANES, THROTTLE_FIRST, available_catalogue
 from .rasters import core_frame, throttle_frame
 from .render import fmt_time
 from .sampler import Sampler
@@ -118,12 +118,13 @@ class Main(QMainWindow):
         # built by walking PANES in order and opening a section when its first
         # member comes up.
         self.sections = []
-        opens = {g.titles[0]: g for g in self.catalogue_groups}
-        grouped = {t for g in self.catalogue_groups for t in g.titles}
+        opens = {g.pane_ids[0]: g for g in self.catalogue_groups}
+        grouped = {pane_id for group in self.catalogue_groups
+                   for pane_id in group.pane_ids}
         header, members = None, []
         for spec in self.catalogue:
-            if spec.title in opens:
-                group = opens[spec.title]
+            if spec.id in opens:
+                group = opens[spec.id]
                 header = SectionHeader(group)
                 self.col.addWidget(header)
                 self.sections.append(header)
@@ -132,12 +133,12 @@ class Main(QMainWindow):
                     lambda on, m=members: self._set_section(m, on))
             frame = chart_frame(spec, self.view,
                                 indent=(render.INDENT
-                                        if spec.title in grouped else 0))
+                                        if spec.id in grouped else 0))
             self._add_pane(frame)
-            if spec.title in grouped:
+            if spec.id in grouped:
                 members.append(frame)
                 frame.setVisible(header.expanded)
-            if spec.title == HEAT_AFTER:
+            if spec.id == HEAT_AFTER_ID:
                 hf = core_frame(self.view, core_count=self.core_count)
                 self.heat_frame = hf
                 self.heat = hf.body

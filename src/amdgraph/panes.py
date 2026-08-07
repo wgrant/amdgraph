@@ -10,6 +10,20 @@ May import: nothing in this package.
 
 from dataclasses import dataclass
 
+PANE_ID_BY_TITLE = {
+    "Package power": "package_power", "VRM current": "vrm_current",
+    "Power breakdown": "power_breakdown",
+    "Accelerator power": "accelerator_power", "Rail power": "rail_power",
+    "Voltage": "voltage", "SMU temperature": "smu_temperature",
+    "System temperature": "system_temperature",
+    "Board temperature": "board_temperature", "CPU clock": "cpu_clock",
+    "SoC clock": "soc_clock", "GPU clock": "gpu_clock",
+    "Accelerator clock": "accelerator_clock", "Utilisation": "utilisation",
+    "Memory bandwidth": "memory_bandwidth", "IPU activity": "ipu_activity",
+    "Fan command": "fan_command", "Fan speed": "fan_speed",
+    "Platform state": "platform_state",
+}
+
 
 @dataclass(frozen=True)
 class SeriesSpec:
@@ -62,6 +76,7 @@ class PaneGroup:
     def __init__(self, title, titles, collapsed=True, note=None):
         self.title = title
         self.titles = tuple(titles)
+        self.pane_ids = tuple(PANE_ID_BY_TITLE[title] for title in titles)
         self.collapsed = collapsed
         self.note = note
 
@@ -74,6 +89,7 @@ class PaneSpec:
     def __init__(self, title, unit, series, floor0=True, height=112,
                  note=None):
         self.title, self.unit = title, unit
+        self.id = PANE_ID_BY_TITLE[title]
         self.series = [Series(*s) for s in series]
         self.floor0 = floor0
         self.height = height
@@ -103,10 +119,12 @@ def available_catalogue(keys):
             specs.append(PaneSpec(original.title, original.unit, series,
                                   original.floor0, original.height,
                                   original.note))
-    titles = {s.title for s in specs}
+    pane_ids = {spec.id for spec in specs}
     groups = []
     for original in GROUPS:
-        members = tuple(t for t in original.titles if t in titles)
+        members = tuple(title for title, pane_id in
+                        zip(original.titles, original.pane_ids)
+                        if pane_id in pane_ids)
         if members:
             groups.append(PaneGroup(original.title, members,
                                     original.collapsed, original.note))
@@ -364,3 +382,4 @@ HEAT_MODES = [
 # are the corroboration.
 THROTTLE_FIRST = True
 HEAT_AFTER = "CPU clock"
+HEAT_AFTER_ID = "cpu_clock"
