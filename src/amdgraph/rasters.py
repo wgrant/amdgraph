@@ -161,12 +161,25 @@ class CorePane(TimePane):
 
         lo, hi = self._draw_image(p, r, self.view.store, base, dlo, dhi)
 
-        p.setPen(MUTED)
+        store, t = self.view.store, self.view.cursor
         for c in range(N_CORES):
             y = r.top() + c * self.ROW
+            p.setPen(MUTED)
             p.drawText(QRectF(0, y, self.gutter_left() - 8, self.ROW),
                        Qt.AlignmentFlag.AlignRight
                        | Qt.AlignmentFlag.AlignVCenter, f"core {c}")
+            # The value at the end of the row it belongs to, the way a chart
+            # pane labels the end of each trace. Eight numbers in one header
+            # strip only ever fitted four and a half of them, and put each one
+            # nowhere near the core it described.
+            v = (store.at(f"{base}_{c}", t) if t is not None
+                 else store.latest(f"{base}_{c}"))
+            if v is not None:
+                p.setPen(INK_DIM)
+                p.drawText(QRectF(r.right() + 6, y,
+                                  self.width() - r.right() - 12, self.ROW),
+                           Qt.AlignmentFlag.AlignRight
+                           | Qt.AlignmentFlag.AlignVCenter, fmt_val(v, unit))
 
         self._draw_colorbar(p, r, lo, hi, unit)
 
@@ -287,26 +300,6 @@ class ThrottleReadout(Readout):
                        | Qt.AlignmentFlag.AlignVCenter, txt)
 
 
-class CoreReadout(Readout):
-    """The per-core values at the crosshair, in row order."""
-
-    def __init__(self, view, pane, parent=None):
-        super().__init__(parent)
-        self.view, self.pane = view, pane
-        self.setMinimumWidth(120)
-
-    def draw(self, p, r):
-        base, _name, unit, _lo, _hi = HEAT_MODES[self.pane.mode]
-        store, t = self.view.store, self.view.cursor
-        vals = [(store.at(f"{base}_{c}", t) if t is not None
-                 else store.latest(f"{base}_{c}")) for c in range(N_CORES)]
-        txt = "  ".join(fmt_val(v, unit) for v in vals if v is not None)
-        if txt:
-            p.setPen(INK_DIM)
-            p.drawText(r, Qt.AlignmentFlag.AlignRight
-                       | Qt.AlignmentFlag.AlignVCenter, txt)
-
-
 def _combo(items, current, apply):
     box = QComboBox()
     for label in items:
@@ -348,14 +341,9 @@ def core_frame(view, indent=0):
     window.
     """
     body = CorePane(view)
-    readout = CoreReadout(view, body)
-
-    def pick(i):
-        body.set_mode(i)
-        readout.update()
-
-    modes = _combo([f"{n} ({u})" for _k, n, u, _l, _h in HEAT_MODES], 0, pick)
-    frame = PaneFrame(body, "Per-core", controls=[modes], readout=readout,
+    modes = _combo([f"{n} ({u})" for _k, n, u, _l, _h in HEAT_MODES], 0,
+                   body.set_mode)
+    frame = PaneFrame(body, "Per-core", controls=[modes],
                       height=render.HEADER_H + body.minimumHeight(),
                       indent=indent)
     frame.modes = modes

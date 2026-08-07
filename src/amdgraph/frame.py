@@ -139,10 +139,14 @@ class PaneFrame(QWidget):
             h.addWidget(self.note, 1)
         else:
             self.note = None
-            h.addStretch(1)
+            if readout is None:
+                h.addStretch(1)
 
         if readout is not None:
-            h.addWidget(readout, 0)
+            # With a note present the note takes the slack and the readout
+            # keeps its sizeHint; with no note the readout takes the slack
+            # itself, rather than a spacer holding it at its minimum.
+            h.addWidget(readout, 0 if note else 1)
 
         lay.addWidget(self.header)
         lay.addWidget(body, 1)

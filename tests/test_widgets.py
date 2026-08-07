@@ -231,6 +231,33 @@ class TestHeaderLayout:
             view.store.append(1000.0 + i, {s.key: 987.654 for s in spec.series})
         assert frame.readout.sizeHint().width() == before
 
+    def test_per_core_values_sit_on_their_rows_not_in_the_header(self, view,
+                                                                 store):
+        """Eight numbers crammed into one header strip only ever fitted four
+        and a half of them, and put each one nowhere near the core it
+        described. They belong at the end of their own row, the way a chart
+        pane labels the end of each trace."""
+        frame = core_frame(view)
+        assert frame.readout is None
+        body = frame.body
+        body.resize(W, body.minimumHeight())
+        r = body.plot_rect()
+        # A gutter wide enough for the widest value, on every row.
+        fm = QFontMetrics(body.font())
+        widest = max(fm.horizontalAdvance(f"{v:.0f}") for v in (9999, 100.5))
+        assert body.width() - r.right() - 12 >= widest
+        assert r.bottom() - r.top() == N_CORES * body.ROW
+
+    def test_a_readout_with_no_note_beside_it_takes_the_slack(self, view):
+        """ThrottleReadout has no sizeHint, so a stretch spacer beside it left
+        it pinned at its 160 px minimum and the active-reason list was cut
+        off."""
+        frame = throttle_frame(view)
+        frame.resize(1180, frame.height())
+        frame.show()
+        assert frame.note is None
+        assert frame.readout.width() > 400
+
     def test_the_note_yields_before_the_legend_does(self, view):
         """Something has to give on a narrow window. The note is the least
         important thing in the row, so it must be spent down to nothing before
