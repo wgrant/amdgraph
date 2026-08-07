@@ -89,7 +89,7 @@ def gm3_blob(residencies=(0,) * 7):
     struct.pack_into("<HH8H16H4H", b, 42, 25, 3, *range(10, 18),
                      *range(16), 2048, 1024, 512, 256)
     struct.pack_into("<I", b, fields.GM3_SOCKET_PWR_OFF, 70000)
-    struct.pack_into("<I", b, fields.GM3_IPU_PWR_OFF, 5000)
+    struct.pack_into("<HH", b, fields.GM3_IPU_PWR_OFF, 5000, 0xFFFF)
     struct.pack_into("<I", b, fields.GM3_APU_PWR_OFF, 65000)
     struct.pack_into("<I", b, fields.GM3_GFX_PWR_OFF, 12000)
     struct.pack_into("<I", b, fields.GM3_DGPU_PWR_OFF, 0)

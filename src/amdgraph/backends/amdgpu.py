@@ -254,8 +254,11 @@ class AmdGpuBackend(Backend):
         s["ipu_rd"] = self._valid(u16(GM3_IPU_BW_OFF)[0], 1024.0)
         s["ipu_wr"] = self._valid(u16(GM3_IPU_BW_OFF + 2)[0], 1024.0)
 
+        # average_ipu_power is the lone u16 in this naturally aligned power
+        # block. Reading a u32 here consumed its 0xFFFF padding too and turned
+        # an unavailable zero into 4.29 million watts on Strix Halo.
+        s.setdefault("pwr_ipu", self._valid(u16(GM3_IPU_PWR_OFF)[0], 1000.0))
         for key, off in (("pwr_socket", GM3_SOCKET_PWR_OFF),
-                         ("pwr_ipu", GM3_IPU_PWR_OFF),
                          ("pwr_apu", GM3_APU_PWR_OFF),
                          ("pwr_gfx", GM3_GFX_PWR_OFF),
                          ("pwr_dgpu", GM3_DGPU_PWR_OFF),

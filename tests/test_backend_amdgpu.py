@@ -181,3 +181,20 @@ def test_strix_v3_keeps_verified_pm_per_core_values(tmp_path):
         assert out["core_freq_max"] == 4321.0
     finally:
         backend.close()
+
+
+def test_strix_ipu_power_is_u16_not_ipu_plus_padding(tmp_path):
+    path = tmp_path / "gpu_metrics"
+    raw = bytearray(gm3_blob())
+    # Zero power followed by the ABI's unavailable/padding marker used to be
+    # unpacked together as 0xFFFF0000 and displayed as 4.29 million watts.
+    raw[fields.GM3_IPU_PWR_OFF:fields.GM3_IPU_PWR_OFF + 4] = \
+        b"\x00\x00\xff\xff"
+    path.write_bytes(raw)
+    backend = AmdGpuBackend(str(tmp_path), str(path), True, "", RealFS())
+    try:
+        out = {}
+        backend._metrics_v3(out, RealFS())
+        assert out["pwr_ipu"] == 0.0
+    finally:
+        backend.close()
