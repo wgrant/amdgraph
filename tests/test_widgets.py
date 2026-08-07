@@ -16,9 +16,12 @@ import pytest
 pytest.importorskip("PyQt6.QtWidgets")
 
 from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt          # noqa: E402
-from PyQt6.QtGui import QImage, QMouseEvent, QWheelEvent      # noqa: E402
+from PyQt6.QtGui import (QFont, QFontMetrics, QImage,         # noqa: E402
+                         QMouseEvent, QWheelEvent)
 
+from amdgraph import render                                   # noqa: E402
 from amdgraph.chart import ChartPane                          # noqa: E402
+from amdgraph.fields import N_CORES, THROTTLE_BITS            # noqa: E402
 from amdgraph.panes import HEAT_MODES, PANES                  # noqa: E402
 from amdgraph.rasters import CorePane, ThrottlePane           # noqa: E402
 from amdgraph.render import TOP                               # noqa: E402
@@ -39,7 +42,7 @@ def make(kind, view):
     return w
 
 
-def render(w, h=None):
+def render_pane(w, h=None):
     h = h or max(1, w.minimumHeight() or 120)
     w.resize(W, h)
     img = QImage(W, h, QImage.Format.Format_ARGB32)
@@ -74,26 +77,76 @@ def wheel(w, x, dy):
         Qt.ScrollPhase.NoScrollPhase, False))
 
 
+class TestGutters:
+    """The gutters were fixed pixel counts tuned against one font size, so on a
+    desktop with a larger default font the row labels lost their first
+    character ("PROCHOT CPU" -> "ROCHOT CPU") and the end-of-line labels lost
+    their last ("amdgpu hwmon" -> "amdgpu hwmor"). Only visible in a
+    screenshot, which is a bad place to find out."""
+
+    @pytest.fixture(autouse=True)
+    def restore(self):
+        before = (render.LEFT, render.RIGHT)
+        yield
+        render.LEFT, render.RIGHT = before
+
+    def rows_and_series(self):
+        return ([n for _b, n, _f in THROTTLE_BITS]
+                + [f"core {i}" for i in range(N_CORES)],
+                [s.label for spec in PANES for s in spec.series])
+
+    @pytest.mark.parametrize("pt", [6.0, 7.5, 9.0, 11.0, 14.0, 20.0])
+    def test_every_label_fits_at_any_font_size(self, pt):
+        rows, series = self.rows_and_series()
+        f = QFont()
+        f.setPointSizeF(pt)
+        render.calibrate(f, rows, series)
+        fm = QFontMetrics(f)
+        # The gutters the panes actually draw into, from rasters.py/chart.py.
+        assert max(fm.horizontalAdvance(s) for s in rows) <= render.LEFT - 8
+        assert max(fm.horizontalAdvance(s)
+                   for s in series) <= render.RIGHT - 12
+
+    def test_never_narrows_below_the_defaults(self):
+        rows, series = self.rows_and_series()
+        f = QFont()
+        f.setPointSizeF(4.0)
+        left, right = render.calibrate(f, rows, series)
+        assert (left, right) >= (render._DEFAULT_LEFT, render._DEFAULT_RIGHT)
+
+    def test_panes_and_axis_agree_after_recalibration(self, view):
+        rows, series = self.rows_and_series()
+        f = QFont()
+        f.setPointSizeF(18.0)
+        render.calibrate(f, rows, series)
+        pane = ChartPane(PANES[0], view)
+        render_pane(pane, PANES[0].height)
+        strip = ThrottlePane(view)
+        render_pane(strip)
+        assert pane.plot_rect().left() == strip.plot_rect().left()
+        assert pane.plot_rect().right() == strip.plot_rect().right()
+
+
 class TestRendering:
     @pytest.mark.parametrize("spec", PANES, ids=lambda s: s.title)
     def test_every_pane_in_the_catalogue_paints(self, view, spec):
-        render(ChartPane(spec, view), spec.height)
+        render_pane(ChartPane(spec, view), spec.height)
 
     def test_throttle_strip_paints(self, view):
-        render(ThrottlePane(view))
+        render_pane(ThrottlePane(view))
 
     @pytest.mark.parametrize("mode", range(len(HEAT_MODES)),
                              ids=[m[1] for m in HEAT_MODES])
     def test_core_strip_paints_in_every_mode(self, view, mode):
         c = CorePane(view)
         c.set_mode(mode)
-        render(c)
+        render_pane(c)
 
     @pytest.mark.parametrize("kind", KINDS)
     def test_panes_paint_over_an_empty_store(self, kind):
         v = View(Store())
         v.update_range()
-        render(make(kind, v))
+        render_pane(make(kind, v))
 
     @pytest.mark.parametrize("kind", KINDS)
     def test_panes_paint_with_cursor_markers_and_overlay(self, kind, view,
@@ -103,16 +156,16 @@ class TestRendering:
         view.overlay = store
         w = make(kind, view)
         w.label_markers = True
-        render(w)
+        render_pane(w)
 
     def test_a_cursor_outside_the_window_is_not_drawn(self, view):
         view.cursor = view.t1 + 10_000
-        render(ChartPane(PANES[0], view), PANES[0].height)
+        render_pane(ChartPane(PANES[0], view), PANES[0].height)
 
     def test_whole_recording_exercises_the_decimation_path(self, view):
         view.window = 0.0
         view.update_range()
-        render(ChartPane(PANES[0], view), PANES[0].height)
+        render_pane(ChartPane(PANES[0], view), PANES[0].height)
 
     @pytest.mark.parametrize("spec", PANES, ids=lambda s: s.title)
     def test_height_is_fixed_so_the_column_lines_up(self, view, spec):
@@ -212,7 +265,7 @@ class TestLegend:
             s.visible = True
         cp = ChartPane(spec, view)
         cp.resize(W, spec.height)
-        render(cp, spec.height)          # populates the legend hit boxes
+        render_pane(cp, spec.height)          # populates the legend hit boxes
         yield cp, spec
         for s in spec.series:
             s.visible = True             # PANES is module state; put it back

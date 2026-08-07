@@ -7,11 +7,12 @@ May import: palette, render.
 """
 
 from PyQt6.QtCore import QPointF, QRectF, Qt
-from PyQt6.QtGui import QFont, QFontMetrics, QPainter, QPen
+from PyQt6.QtGui import QFontMetrics, QPainter, QPen
 from PyQt6.QtWidgets import QWidget
 
+from . import render
 from .palette import AXIS, INK, MUTED, SURFACE, alpha
-from .render import LEFT, RIGHT, fmt_time, time_ticks
+from .render import fmt_time, pane_font, time_ticks
 
 
 class TimeAxis(QWidget):
@@ -24,9 +25,7 @@ class TimeAxis(QWidget):
         self.view = view
         self.scroll = scroll
         self.setFixedHeight(22)
-        f = QFont()
-        f.setPointSizeF(max(7.5, f.pointSizeF() - 1.5))
-        self.setFont(f)
+        self.setFont(pane_font())
 
     def paintEvent(self, _ev):
         p = QPainter(self)
@@ -36,13 +35,14 @@ class TimeAxis(QWidget):
         # away from the gridlines the moment a scrollbar appears.
         sb = self.scroll.verticalScrollBar()
         inset = sb.width() if sb.isVisible() else 0
-        w = max(10, self.width() - LEFT - RIGHT - inset)
+        left = render.LEFT
+        w = max(10, self.width() - left - render.RIGHT - inset)
         span = max(1e-9, self.view.t1 - self.view.t0)
         fm = QFontMetrics(self.font())
         p.setPen(QPen(AXIS, 1))
-        p.drawLine(QPointF(LEFT, 0), QPointF(LEFT + w, 0))
+        p.drawLine(QPointF(left, 0), QPointF(left + w, 0))
         for t in time_ticks(self.view.t0, self.view.t1):
-            x = LEFT + (t - self.view.t0) / span * w
+            x = left + (t - self.view.t0) / span * w
             p.setPen(QPen(AXIS, 1))
             p.drawLine(QPointF(x, 0), QPointF(x, 4))
             p.setPen(MUTED)
@@ -50,8 +50,8 @@ class TimeAxis(QWidget):
             p.drawText(QRectF(x - 40, 4, 80, fm.height()),
                        Qt.AlignmentFlag.AlignHCenter, lbl)
         if self.view.cursor is not None:
-            x = LEFT + (self.view.cursor - self.view.t0) / span * w
-            if LEFT <= x <= LEFT + w:
+            x = left + (self.view.cursor - self.view.t0) / span * w
+            if left <= x <= left + w:
                 lbl = fmt_time(self.view.cursor)
                 tw = fm.horizontalAdvance(lbl) + 10
                 p.fillRect(QRectF(x - tw / 2, 2, tw, fm.height() + 2),

@@ -12,15 +12,62 @@ import math
 
 import numpy as np
 from PyQt6.QtCore import QPointF, QRectF, Qt
-from PyQt6.QtGui import QFontMetrics, QPen, QPolygonF
+from PyQt6.QtGui import QFont, QFontMetrics, QPen, QPolygonF
 
 from .palette import MARKER, PANE_BG, alpha
 
-LEFT = 72          # y-axis gutter; identical in every pane so they line up
-                   # (and wide enough for the longest cap-reason row label)
+# Gutters, identical in every pane so the columns line up. Read these as
+# `render.LEFT`, never `from .render import LEFT`: calibrate() replaces them at
+# startup and a from-import would bind the stale value.
+#
+# They were fixed pixel counts, tuned against a 7.5 pt label -- but the fonts
+# are derived from the system's default size and scale with it and with DPI,
+# while the gutters did not. On a desktop with a larger default font the row
+# labels lost their first character ("PROCHOT CPU" rendered as "ROCHOT CPU")
+# and end-of-line labels lost their last ("amdgpu hwmon" -> "amdgpu hwmor").
+# Measuring the actual strings is the only thing that holds across machines.
+LEFT = 72          # y-axis gutter, and the cap-reason / per-core row labels
 RIGHT = 104        # room for end-of-line direct labels
 TOP = 26
 BOTTOM = 6
+
+_DEFAULT_LEFT, _DEFAULT_RIGHT = LEFT, RIGHT
+
+
+def pane_font():
+    """The body font every pane and the axis use: one step below the system
+    default, floored so it stays legible where that default is already small."""
+    f = QFont()
+    f.setPointSizeF(max(7.5, f.pointSizeF() - 1.5))
+    return f
+
+
+def row_label_font():
+    """Smaller again, for the raster row labels in the left gutter."""
+    f = pane_font()
+    f.setPointSizeF(max(6.5, f.pointSizeF() - 1.0))
+    return f
+
+
+def calibrate(font, row_labels, series_labels):
+    """Widen the gutters until the widest label of each kind fits.
+
+    Called once, after a QApplication exists so the metrics are real. Measured
+    at the body font even for the raster rows, which are drawn a step smaller —
+    over-provisioning by a few pixels is cheaper than another clipped label.
+
+    Never narrows below the defaults: the left gutter also has to hold y-axis
+    tick text, which is not known until there is data.
+    """
+    global LEFT, RIGHT
+    fm = QFontMetrics(font)
+    LEFT = max(_DEFAULT_LEFT,
+               max((fm.horizontalAdvance(s) for s in row_labels), default=0)
+               + 12)
+    RIGHT = max(_DEFAULT_RIGHT,
+                max((fm.horizontalAdvance(s) for s in series_labels),
+                    default=0) + 20)
+    return LEFT, RIGHT
 
 
 def nice_range(lo, hi, floor0):

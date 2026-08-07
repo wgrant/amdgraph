@@ -12,10 +12,11 @@ pytest.importorskip("PyQt6.QtWidgets")
 from PyQt6.QtGui import QImage                                # noqa: E402
 from PyQt6.QtWidgets import QScrollArea                       # noqa: E402
 
+from amdgraph import render                                   # noqa: E402
 from amdgraph.axis import TimeAxis                            # noqa: E402
 from amdgraph.chart import ChartPane                          # noqa: E402
 from amdgraph.panes import PANES                              # noqa: E402
-from amdgraph.render import LEFT, RIGHT, time_ticks           # noqa: E402
+from amdgraph.render import time_ticks                        # noqa: E402
 from amdgraph.store import Store                              # noqa: E402
 from amdgraph.view import View                                # noqa: E402
 
@@ -32,7 +33,7 @@ def axis(view):
     return a
 
 
-def render(w, h):
+def paint(w, h):
     img = QImage(w.width(), h, QImage.Format.Format_ARGB32)
     img.fill(0)
     w.render(img)
@@ -40,12 +41,12 @@ def render(w, h):
 
 
 def test_paints(axis):
-    render(axis, 22)
+    paint(axis, 22)
 
 
 def test_paints_with_a_cursor(axis, view):
     view.cursor = (view.t0 + view.t1) / 2
-    render(axis, 22)
+    paint(axis, 22)
 
 
 def test_paints_over_an_empty_store(qapp):
@@ -53,7 +54,7 @@ def test_paints_over_an_empty_store(qapp):
     v.update_range()
     a = TimeAxis(v, QScrollArea())
     a.resize(W, 22)
-    render(a, 22)
+    paint(a, 22)
 
 
 def test_height_is_fixed(axis):
@@ -65,12 +66,12 @@ def test_ticks_land_on_the_panes_gridlines(axis, view):
     ruler stops describing the chart above it."""
     pane = ChartPane(PANES[0], view)
     pane.resize(W, PANES[0].height)
-    render(pane, PANES[0].height)          # settle the cached plot rect
+    paint(pane, PANES[0].height)          # settle the cached plot rect
 
     span = view.t1 - view.t0
-    usable = W - LEFT - RIGHT              # no scrollbar visible offscreen
+    usable = W - render.LEFT - render.RIGHT   # no scrollbar visible offscreen
     for t in time_ticks(view.t0, view.t1):
-        axis_x = LEFT + (t - view.t0) / span * usable
+        axis_x = render.LEFT + (t - view.t0) / span * usable
         pane_x = float(pane.x_of(t))
         assert axis_x == pytest.approx(pane_x, abs=1e-6)
 
@@ -80,4 +81,4 @@ def test_ticks_track_a_zoom(axis, view):
     ticks = time_ticks(view.t0, view.t1)
     assert ticks
     assert all(view.t0 - 1e-9 <= t <= view.t1 + 1e-9 for t in ticks)
-    render(axis, 22)
+    paint(axis, 22)

@@ -19,8 +19,10 @@ from PyQt6.QtWidgets import (QComboBox, QFileDialog, QHBoxLayout,
                              QInputDialog, QLabel, QMainWindow, QMessageBox,
                              QPushButton, QScrollArea, QVBoxLayout, QWidget)
 
+from . import render
 from .axis import TimeAxis
 from .chart import ChartPane
+from .fields import N_CORES, THROTTLE_BITS
 from .palette import INK, MUTED, SURFACE
 from .panes import (CAP_DEFAULT, CAP_RATES, HEAT_AFTER, HEAT_MODES, PANES,
                     THROTTLE_FIRST)
@@ -30,6 +32,18 @@ from .sampler import Sampler
 from .session import DATA_DIR, Recorder, load_session, record_keys
 from .store import Store
 from .view import View
+
+
+def tilde(path):
+    """Abbreviate $HOME to ~ for display.
+
+    The status bar shows the path being recorded to, and that path is mostly a
+    username. Screenshots of this program end up in bug reports and READMEs.
+    """
+    home = os.path.expanduser("~")
+    if path and path.startswith(home + os.sep):
+        return "~" + path[len(home):]
+    return path
 
 
 class Main(QMainWindow):
@@ -50,6 +64,15 @@ class Main(QMainWindow):
         self.live = True
         self._cursor_pending = False
         self.t_start = time.monotonic()
+
+        # Size the shared gutters to the text that actually has to fit, before
+        # any pane is built. Fixed pixel counts clipped labels on any desktop
+        # whose default font is larger than the one they were tuned against.
+        render.calibrate(
+            render.pane_font(),
+            [n for _b, n, _f in THROTTLE_BITS]
+            + [f"core {i}" for i in range(N_CORES)],
+            [s.label for spec in PANES for s in spec.series])
 
         root = QWidget()
         self.setCentralWidget(root)
@@ -192,7 +215,7 @@ class Main(QMainWindow):
 
         self.btn_rec = QPushButton("● Record")
         self.btn_rec.setCheckable(True)
-        self.btn_rec.setToolTip(f"Append samples to {DATA_DIR}")
+        self.btn_rec.setToolTip(f"Append samples to {tilde(DATA_DIR)}")
         self.btn_rec.toggled.connect(self.on_record)
         h.addWidget(self.btn_rec)
 
@@ -281,7 +304,7 @@ class Main(QMainWindow):
             bits.append(f"showing {fmt_time(self.view.t1 - self.view.t0)}"
                         " · Esc to follow again")
         if self.recorder:
-            bits.append(f"recording → {self.recorder.path}")
+            bits.append(f"recording → {tilde(self.recorder.path)}")
         if self.view.overlay is not None:
             bits.append(f"overlay: {self.view.overlay_name}")
         bits.extend(self.sampler.notes())

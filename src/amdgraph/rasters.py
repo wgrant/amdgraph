@@ -16,7 +16,8 @@ from .fields import N_CORES, THROTTLE_BITS
 from .palette import (CRITICAL, INK, INK_DIM, LUT, MUTED, PANE_BG, RAMP,
                       SERIES, alpha)
 from .panes import HEAT_MODES
-from .render import LEFT, RIGHT, TOP, column_hold, draw_markers, fmt_val
+from . import render
+from .render import TOP, column_hold, draw_markers, fmt_val, row_label_font
 from .timepane import TimePane
 
 
@@ -43,13 +44,14 @@ class ThrottlePane(TimePane):
         self.fix_height(TOP + len(THROTTLE_BITS) * self.ROW + 8)
         self._buf = None
         # Row labels get their own smaller font: "PROCHOT CPU" is the longest
-        # name here and does not fit the shared gutter at body size, and the
-        # gutter width is fixed because every pane has to line up with it.
-        self.label_font = QFont(self.font())
-        self.label_font.setPointSizeF(max(6.5, self.font().pointSizeF() - 1.0))
+        # name here and does not fit the shared gutter at body size. The gutter
+        # itself is sized from these strings at startup -- see
+        # render.calibrate() -- because it has to be the same in every pane.
+        self.label_font = row_label_font()
 
     def plot_rect(self):
-        return QRectF(LEFT, TOP, max(10, self.width() - LEFT - RIGHT),
+        return QRectF(render.LEFT, TOP,
+                      max(10, self.width() - render.LEFT - render.RIGHT),
                       len(THROTTLE_BITS) * self.ROW)
 
     def paintEvent(self, _ev):
@@ -65,7 +67,7 @@ class ThrottlePane(TimePane):
         for i, (_bit, name, fam) in enumerate(THROTTLE_BITS):
             y = r.top() + i * self.ROW
             p.setPen(alpha(self.FAMILY[fam], 210))
-            p.drawText(QRectF(0, y, LEFT - 4, self.ROW),
+            p.drawText(QRectF(0, y, render.LEFT - 4, self.ROW),
                        Qt.AlignmentFlag.AlignRight
                        | Qt.AlignmentFlag.AlignVCenter, name)
         p.setFont(self.font())
@@ -175,7 +177,8 @@ class CorePane(TimePane):
         self.update()
 
     def plot_rect(self):
-        return QRectF(LEFT, TOP, max(10, self.width() - LEFT - RIGHT),
+        return QRectF(render.LEFT, TOP,
+                      max(10, self.width() - render.LEFT - render.RIGHT),
                       N_CORES * self.ROW)
 
     def paintEvent(self, _ev):
@@ -191,7 +194,7 @@ class CorePane(TimePane):
         p.setPen(MUTED)
         for c in range(N_CORES):
             y = r.top() + c * self.ROW
-            p.drawText(QRectF(0, y, LEFT - 8, self.ROW),
+            p.drawText(QRectF(0, y, render.LEFT - 8, self.ROW),
                        Qt.AlignmentFlag.AlignRight
                        | Qt.AlignmentFlag.AlignVCenter, f"core {c}")
 

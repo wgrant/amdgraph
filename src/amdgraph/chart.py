@@ -14,8 +14,9 @@ from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 
 from .palette import (AXIS, CRITICAL, GRID, INK, INK_DIM, MUTED, PANE_BG,
                       SERIES, WARNING, alpha)
-from .render import (BOTTOM, LEFT, RIGHT, TOP, draw_markers, fmt_val,
-                     nice_range, polylines, time_ticks)
+from . import render
+from .render import (BOTTOM, TOP, draw_markers, fmt_val, nice_range,
+                     polylines, time_ticks)
 from .timepane import TimePane
 
 
@@ -41,9 +42,10 @@ class ChartPane(TimePane):
         # per call, and y_of() calls it once per plotted point -- it was the
         # single largest cost in a repaint.
         if self._rect is None:
-            self._rect = QRectF(LEFT, TOP,
-                                max(10, self.width() - LEFT - RIGHT),
-                                max(10, self.height() - TOP - BOTTOM))
+            self._rect = QRectF(
+                render.LEFT, TOP,
+                max(10, self.width() - render.LEFT - render.RIGHT),
+                max(10, self.height() - TOP - BOTTOM))
         return self._rect
 
     def y_of(self, v):
@@ -127,7 +129,8 @@ class ChartPane(TimePane):
             p.drawLine(QPointF(r.left(), y), QPointF(r.right(), y))
             p.setPen(MUTED)
             txt = fmt_val(v, self.spec.unit)
-            p.drawText(QRectF(0, y - fm.height() / 2, LEFT - 8, fm.height()),
+            p.drawText(QRectF(0, y - fm.height() / 2, render.LEFT - 8,
+                              fm.height()),
                        Qt.AlignmentFlag.AlignRight
                        | Qt.AlignmentFlag.AlignVCenter, txt)
             v += step
@@ -213,7 +216,7 @@ class ChartPane(TimePane):
             p.setPen(QPen(alpha(QColor(col), 210), 1))
             p.drawLine(QPointF(r.right() + 2, y), QPointF(r.right() + 7, y))
             p.setPen(INK_DIM)
-            p.drawText(QRectF(r.right() + 10, y - h / 2, RIGHT - 12, h),
+            p.drawText(QRectF(r.right() + 10, y - h / 2, render.RIGHT - 12, h),
                        Qt.AlignmentFlag.AlignLeft
                        | Qt.AlignmentFlag.AlignVCenter, label)
 
@@ -239,32 +242,26 @@ class ChartPane(TimePane):
         tw = fm.horizontalAdvance(title) + 18
         p.setFont(self.font())
 
+        # Measure the legend before drawing the note, so the note gets the room
+        # that is actually left. It used to be drawn into a fixed 320 px box and
+        # was simply cut off mid-word on a narrow window or a large font.
+        entries = self._legend_entries(fm, store, t)
+        legend_w = sum(w for _i, _s, _txt, w, _flag in entries)
+
         if self.spec.note:
             p.setPen(MUTED)
-            p.drawText(QRectF(6 + tw, 2, 320, TOP - 4),
-                       Qt.AlignmentFlag.AlignLeft
-                       | Qt.AlignmentFlag.AlignVCenter, self.spec.note)
+            avail = self.width() - 8 - legend_w - (6 + tw) - 12
+            if avail > 24:
+                p.drawText(QRectF(6 + tw, 2, avail, TOP - 4),
+                           Qt.AlignmentFlag.AlignLeft
+                           | Qt.AlignmentFlag.AlignVCenter,
+                           fm.elidedText(self.spec.note,
+                                         Qt.TextElideMode.ElideRight,
+                                         int(avail)))
 
         # Legend, right-aligned, built right-to-left.
         x = self.width() - 8
-        for i in reversed(range(len(self.spec.series))):
-            s = self.spec.series[i]
-            # Value and limit are read at the same instant. Reading the value
-            # at the crosshair but the limit at "now" compared two different
-            # moments, which mattered as soon as the limits started moving.
-            if t is not None:
-                v = store.at(s.key, t)
-                lim = store.at(s.limit, t) if s.limit else None
-            else:
-                v = store.latest(s.key)
-                lim = store.latest(s.limit) if s.limit else None
-            txt = f"{s.label} {fmt_val(v, self.spec.unit)}"
-            if lim is not None and math.isfinite(lim) and lim > 0:
-                txt += f"/{fmt_val(lim, self.spec.unit)}"
-            flag = self._limit_flag(s, v, lim)
-            if flag:
-                txt += f"  {flag[0]}"
-            w = fm.horizontalAdvance(txt) + 20
+        for i, s, txt, w, flag in reversed(entries):
             if x - w < 6:
                 break
             x -= w
@@ -287,6 +284,32 @@ class ChartPane(TimePane):
                            Qt.AlignmentFlag.AlignLeft
                            | Qt.AlignmentFlag.AlignVCenter, flag[0])
             self.spec.series[i].hit = (x, x + w)
+
+    def _legend_entries(self, fm, store, t):
+        """(index, series, text, width, flag) for each series, in pane order.
+
+        Split out from drawing so the note can be given whatever width the
+        legend does not need.
+        """
+        out = []
+        for i, s in enumerate(self.spec.series):
+            # Value and limit are read at the same instant. Reading the value
+            # at the crosshair but the limit at "now" compared two different
+            # moments, which mattered as soon as the limits started moving.
+            if t is not None:
+                v = store.at(s.key, t)
+                lim = store.at(s.limit, t) if s.limit else None
+            else:
+                v = store.latest(s.key)
+                lim = store.latest(s.limit) if s.limit else None
+            txt = f"{s.label} {fmt_val(v, self.spec.unit)}"
+            if lim is not None and math.isfinite(lim) and lim > 0:
+                txt += f"/{fmt_val(lim, self.spec.unit)}"
+            flag = self._limit_flag(s, v, lim)
+            if flag:
+                txt += f"  {flag[0]}"
+            out.append((i, s, txt, fm.horizontalAdvance(txt) + 20, flag))
+        return out
 
     @staticmethod
     def _limit_flag(s, v, lim):

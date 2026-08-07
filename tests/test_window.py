@@ -298,6 +298,14 @@ class TestStatus:
         assert "recording →" in main.status.text()
         main.on_record(False)
 
+    def test_the_recording_path_is_shown_without_the_home_directory(self):
+        """A screenshot of the status bar should not be mostly a username."""
+        from amdgraph.window import tilde
+        home = os.path.expanduser("~")
+        assert tilde(f"{home}/x/y.csv") == "~/x/y.csv"
+        assert tilde("/var/tmp/y.csv") == "/var/tmp/y.csv"
+        assert tilde(home) == home            # not a prefix match on its own
+
     def test_zoomed(self, main):
         for _ in range(20):
             main.tick()

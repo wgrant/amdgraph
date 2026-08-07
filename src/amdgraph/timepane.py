@@ -14,10 +14,11 @@ May import: palette, render, view (by duck typing -- a View is passed in).
 
 import numpy as np
 from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QImage, QPainter, QPen
+from PyQt6.QtGui import QColor, QImage, QPainter, QPen
 from PyQt6.QtWidgets import QWidget
 
 from .palette import INK, PANE_BG, SERIES, alpha
+from .render import pane_font
 
 
 class TimePane(QWidget):
@@ -33,9 +34,7 @@ class TimePane(QWidget):
         self.drag_from = None
         self.drag_to = None
         self.label_markers = False      # only the topmost pane titles them
-        f = QFont()
-        f.setPointSizeF(max(7.5, f.pointSizeF() - 1.5))
-        self.setFont(f)
+        self.setFont(pane_font())
 
     def fix_height(self, h):
         self.setMinimumHeight(h)
