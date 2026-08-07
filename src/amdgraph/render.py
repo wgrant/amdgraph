@@ -1,4 +1,4 @@
-"""Layer 3 -- drawing primitives.
+"""Layer 4 -- drawing primitives.
 
 Free functions shared by every widget: axis ranges, number and time
 formatting, and the two expensive conversions from columns of samples into

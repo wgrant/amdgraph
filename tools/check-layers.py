@@ -21,6 +21,7 @@ hardware ABI more deeply never creates an unenforced corner of the package.
 import argparse
 import ast
 import os
+import re
 import sys
 
 PKG_NAME = "amdgraph"
@@ -187,6 +188,12 @@ def check(pkg):
             problems.append(f"{mod}: not assigned a layer in this script")
             continue
         listed.add(mod)
+        tree = ast.parse(open(discovered[mod]).read())
+        doc = ast.get_docstring(tree) or ""
+        match = re.match(r"Layer (\d+)\b", doc)
+        if match and int(match.group(1)) != LAYER[mod]:
+            problems.append(f"{mod}: docstring says layer {match.group(1)}, "
+                            f"checker assigns layer {LAYER[mod]}")
         sib, third = imports_of(discovered[mod], modules, mod)
         for dep in sorted(sib):
             if dep not in LAYER:

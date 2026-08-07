@@ -44,6 +44,18 @@ class FS:
         except (TypeError, ValueError):
             return None
 
+    def read_text(self, path):
+        raise NotImplementedError
+
+    def read_bytes(self, path):
+        raise NotImplementedError
+
+    def glob(self, pattern):
+        raise NotImplementedError
+
+    def listdir(self, path):
+        raise NotImplementedError
+
 
 class RealFS(FS):
     """Reads the actual machine. The only backend used outside development

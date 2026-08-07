@@ -1,4 +1,4 @@
-"""Layer 2 -- colour.
+"""Layer 3 -- colour.
 
 Dark-mode steps, validated against the #16161a chart surface: all four
 categorical slots sit in the L 0.48-0.67 band, clear the 0.1 chroma floor,

@@ -1,4 +1,4 @@
-"""Layer 5 -- entry point.
+"""Layer 6 -- entry point.
 
 Kept thin, and kept free of any package import that pulls in numpy or Qt until
 after the dependency check: the whole value of the check is that a missing

@@ -1,4 +1,4 @@
-"""Layer 4 -- the shared time ruler.
+"""Layer 5 -- the shared time ruler.
 
 Not a TimePane: it is pinned outside the scroll area and answers no gestures,
 but it must land its ticks on the same pixels the panes put their gridlines on.

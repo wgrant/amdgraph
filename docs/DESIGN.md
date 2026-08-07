@@ -36,12 +36,13 @@ absolute, and plain `import amdgraph.x` alike, because the launcher puts `src/`
 on `sys.path` and all three forms run.
 
 ```
-0  fields  smu/*        hardware maps, including one module per SMU table ABI;
-   sysfs                the PM registry; sysfs readers (and FS backends) that
-                        know nothing of it
+0  model fields         shared telemetry types; hardware constants
+   smu/* gpu_metrics/*  one descriptor or pure decoder per versioned ABI
+   sysfs                sysfs readers and real/replay/memory FS implementations
 1  backends             one module per hardware family, each deciding for
                         itself whether it applies to this machine
-2  sampler  store       one tick -> one dict; NaN-filled numpy columns
+2  sampler normalize    isolated backend merge; hardware-neutral derivations
+   store                NaN-filled numpy columns
                         ── no Qt below this line ──
 3  session panes        the CSV format; the pane catalogue
    palette view         colours; the shared time window
@@ -65,7 +66,7 @@ backend module may import `backends.base` (likewise), and `__main__` may import
 ## Data flow
 
 ```
-sysfs ──> Sampler.sample() ──> dict[str, float] ──> Store (numpy columns)
+sysfs ──> backends ──> explicit merge ──> normalize ──> Store (numpy columns)
                                      │                      │
                                      └──> Recorder ──> CSV   └──> panes read
                                                               via View
@@ -93,23 +94,30 @@ adjustable in the toolbar; at 1 Hz the thread does not run at all.
 
 ## The source protocol
 
-`Main` takes a `source=` and uses exactly six methods:
+`Main` takes a `source=` implementing the typed `Source` protocol:
 
 | | |
 |---|---|
 | `sample()` | one tick's worth, `dict[str, float]` |
 | `notes()` | strings for the status bar — what could not be read, and why |
 | `meta()` | fields folded into a recording's header comments |
+| `metric_keys()` | supported telemetry, independent of a successful read |
 | `set_cap_rate(hz)` | how often the cap-reason source is polled |
 | `reset()` | forget differencing state; the buffer was cleared |
 | `close()` | stop background threads |
 
 `Sampler` is the implementation that reads this machine -- or rather,
 composes what `backends/` reads: it discovers which backend modules apply at
-construction and calls the same six methods (where they exist) on each,
-merging their sample dicts into one. Anything specific to how a *particular*
+construction, samples each into an isolated dictionary, applies explicit
+collision priorities, then adds hardware-independent derived values. Anything specific to how a *particular*
 part is read belongs behind a backend's own methods, not here; see
 `src/amdgraph/backends/base.py` and "Adding a part" in `docs/HARDWARE.md`.
+
+Each backend also declares immutable `Metric` descriptors. Those declarations
+drive GUI capability discovery and CSV columns, so a transient startup miss
+cannot hide a supported pane and a newly decoded value cannot silently vanish
+from recordings. Cross-layer tests require every plotted field and limit to be
+recordable, and pure ABI decoder tests require emitted keys to be declared.
 
 This seam was added because the window had no tests: it constructed its own
 `Sampler`, so it could not exist without a Phoenix underneath. It had also been

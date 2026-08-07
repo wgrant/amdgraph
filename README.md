@@ -197,6 +197,7 @@ Each module states what it is allowed to import, and that is enforced:
 
 ```
 uv run pytest              # or: pytest, from a checkout with system packages
+uv run mypy                # typed acquisition core, targeting Python 3.9
 ```
 
 The layering check is one of the tests, and also stands alone as

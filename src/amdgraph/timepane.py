@@ -1,4 +1,4 @@
-"""Layer 4 -- the pane base class.
+"""Layer 5 -- the pane base class.
 
 Every widget in the scrolling column projects the same time window onto the
 same x range and answers the same gestures. That used to be copied three

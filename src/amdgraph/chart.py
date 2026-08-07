@@ -1,4 +1,4 @@
-"""Layer 4 -- the line-chart pane.
+"""Layer 5 -- the line-chart pane.
 
 One PaneSpec in, one strip chart out. This is where a spec's series, ceilings
 and note become pixels; it holds no knowledge of what any particular key means.

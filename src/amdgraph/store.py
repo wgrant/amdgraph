@@ -1,4 +1,4 @@
-"""Layer 1 -- in-memory storage.
+"""Layer 2 -- in-memory storage.
 
 The one data structure every pane reads from. Knows nothing about what any
 column means. May import: nothing in this package.

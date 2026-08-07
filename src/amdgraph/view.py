@@ -1,4 +1,4 @@
-"""Layer 2 -- shared view state.
+"""Layer 3 -- shared view state.
 
 May import: nothing in this package.
 """

@@ -1,4 +1,4 @@
-"""Layer 4 -- the two raster strip charts.
+"""Layer 5 -- the two raster strip charts.
 
 Both answer a question that too many series would only obscure: which of
 thirteen throttler reasons fired, and how load sat across the detected cores.

@@ -53,6 +53,11 @@ def test_discovery_is_recursive(check_layers, tmp_path):
     assert "gpu_metrics.v3.decoder" in check_layers.discover(str(pkg))
 
 
+def test_module_layer_header_must_match_manifest(build):
+    problems = build({"sysfs.py": '"""Layer 4 -- wrong."""\n'})
+    assert any("docstring says layer 4" in problem for problem in problems)
+
+
 @pytest.mark.parametrize("mod, body, needles", [
     # sysfs is layer 0, palette layer 3.
     ("sysfs.py", "from .palette import INK\n", ("sysfs", "palette")),
