@@ -293,6 +293,12 @@ class TestSession:
         # fan_mode is text; the CSV writer would emit it as blank anyway.
         assert "fan_mode" not in record_keys()
 
+    def test_every_catalogue_series_and_limit_is_recordable(self):
+        declared = set(record_keys())
+        plotted = {key for pane in PANES for series in pane.series
+                   for key in (series.key, series.limit) if key}
+        assert plotted <= declared
+
 
 class TestAxisMaths:
     @pytest.mark.parametrize("lo, hi", [
