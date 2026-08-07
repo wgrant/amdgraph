@@ -37,21 +37,26 @@ def main():
                     help="drive a live Sampler from a filesystem recording "
                          "made by tools/amdgraph-record, instead of the "
                          "real machine")
+    ap.add_argument("--socket", metavar="PATH",
+                    help="connect to amdgraphd instead of sampling locally")
     args = ap.parse_args()
 
     _check_deps()
     from PyQt6.QtWidgets import QApplication
     from .window import Main
 
-    source = None
+    source = service = None
     if args.replay:
         from .sampler import Sampler
         from .sysfs import ReplayFS
         source = Sampler(fs=ReplayFS.load(args.replay))
+    if args.socket:
+        from .remote import RemoteHistoryService
+        service = RemoteHistoryService(args.socket)
 
     app = QApplication(sys.argv)
     app.setApplicationName("amdgraph")
-    w = Main(max(0.1, args.interval), args.open, source=source)
+    w = Main(max(0.1, args.interval), args.open, source=source, service=service)
     w.show()
     return app.exec()
 

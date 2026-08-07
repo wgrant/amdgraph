@@ -6,11 +6,15 @@ import os
 import signal
 
 from .protocol import PROTOCOL_VERSION, encode, snapshot
+from .persistence import SQLiteHistory
 from .service import LocalHistoryService
 
 DEFAULT_SOCKET = os.path.join(
     os.environ.get("XDG_RUNTIME_DIR", f"/tmp/amdgraph-{os.getuid()}"),
     "amdgraph.sock")
+DEFAULT_DATABASE = os.path.join(
+    os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")),
+    "amdgraph", "history.sqlite3")
 
 
 class HistoryServer:
@@ -97,8 +101,13 @@ class HistoryServer:
             os.unlink(self.path)
 
 
-async def serve(interval=1.0, path=DEFAULT_SOCKET):
-    server = await HistoryServer(LocalHistoryService(interval), path).start()
+async def serve(interval=1.0, path=DEFAULT_SOCKET, database=DEFAULT_DATABASE,
+                retention=None):
+    persistence = SQLiteHistory(database, retention) if database else None
+    service = LocalHistoryService(interval, persistence=persistence)
+    if persistence is not None:
+        persistence.set_metadata(service.metadata())
+    server = await HistoryServer(service, path).start()
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -113,5 +122,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="amdgraph history server")
     parser.add_argument("-i", "--interval", type=float, default=1.0)
     parser.add_argument("--socket", default=DEFAULT_SOCKET)
+    parser.add_argument("--database", default=DEFAULT_DATABASE)
+    parser.add_argument("--retention", type=float, metavar="SECONDS")
     args = parser.parse_args(argv)
-    asyncio.run(serve(max(0.1, args.interval), args.socket))
+    asyncio.run(serve(max(0.1, args.interval), args.socket,
+                      args.database, args.retention))

@@ -14,12 +14,14 @@ from .store import Store
 class LocalHistoryService:
     """Own sampling, live history, markers, and optional CSV recording."""
 
-    def __init__(self, interval=1.0, source=None, data_dir=DATA_DIR):
+    def __init__(self, interval=1.0, source=None, data_dir=DATA_DIR,
+                 persistence=None):
         self.interval = max(0.1, float(interval))
         self.source = source if source is not None else Sampler()
         self.data_dir = data_dir
-        self.store = Store()
-        self.started = time.monotonic()
+        self.persistence = persistence
+        self.store = persistence.load() if persistence is not None else Store()
+        self.started = time.monotonic() - self.store.span()[1]
         self.recorder = None
         self.closed = False
         self.sample_once()
@@ -29,6 +31,8 @@ class LocalHistoryService:
         self.last_sample = sample
         t = time.monotonic() - self.started
         self.store.append(t, sample)
+        if self.persistence is not None:
+            self.persistence.append(t, sample)
         if self.recorder is not None:
             self.recorder.write(t, sample)
         return t, sample
@@ -48,11 +52,15 @@ class LocalHistoryService:
         self.store = Store()
         self.started = time.monotonic()
         self.source.reset()
+        if self.persistence is not None:
+            self.persistence.clear()
 
     def mark(self, label, t=None):
         if t is None:
             t = self.store.span()[1] if self.store.n else 0.0
         self.store.markers.append((float(t), str(label)))
+        if self.persistence is not None:
+            self.persistence.mark(t, label)
         if self.recorder is not None:
             self.recorder.mark(float(t), str(label))
         return float(t)
@@ -85,4 +93,6 @@ class LocalHistoryService:
             return
         self.stop_recording()
         self.source.close()
+        if self.persistence is not None:
+            self.persistence.close()
         self.closed = True

@@ -28,7 +28,6 @@ class RemoteHistoryService:
         if not self._ready.wait(connect_timeout):
             raise ConnectionError(f"cannot connect to {path}")
         self.started = time.monotonic() - self.store.span()[1]
-        self.last_sample = {}
 
     def _run(self):
         while not self._stop.is_set():
@@ -58,6 +57,8 @@ class RemoteHistoryService:
                 self.interval = float(message.get("interval", 1.0))
             elif kind == "snapshot":
                 self.store = apply_snapshot(message)
+                self.last_sample = {key: self.store.latest(key)
+                                    for key in self.store.cols}
                 self._ready.set()
             elif kind == "sample":
                 self.last_sample = dict(message.get("values", {}))

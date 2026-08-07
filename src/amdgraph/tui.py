@@ -58,5 +58,11 @@ def run(service, console=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Terminal AMD telemetry")
     parser.add_argument("-i", "--interval", type=float, default=1.0)
+    parser.add_argument("--socket", help="connect to amdgraphd")
     args = parser.parse_args(argv)
-    return run(LocalHistoryService(args.interval))
+    if args.socket:
+        from .remote import RemoteHistoryService
+        service = RemoteHistoryService(args.socket)
+    else:
+        service = LocalHistoryService(args.interval)
+    return run(service)

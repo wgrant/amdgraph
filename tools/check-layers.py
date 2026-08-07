@@ -35,7 +35,8 @@ LAYER = {
     "backends.base": 1, "backends.host": 1, "backends.platform": 1,
     "backends.zen_smu": 1, "backends.amdgpu": 1,
     "normalize": 2, "protocol": 2, "sampler": 2, "store": 2,
-    "palette": 3, "panes": 3, "remote": 3, "service": 3, "session": 3,
+    "palette": 3, "panes": 3, "persistence": 3, "remote": 3, "service": 3,
+    "session": 3,
     "view": 3,
     "render": 4,
     "timepane": 5, "frame": 5, "chart": 5, "rasters": 5, "axis": 5,
@@ -59,6 +60,7 @@ ALLOWED_SAME_LAYER = {
     ("sampler", "normalize"),
     ("protocol", "store"),
     ("service", "session"),
+    ("persistence", "session"),
     ("chart", "timepane"),
     ("rasters", "timepane"),
     # frame supplies the widget chrome the painted bodies sit inside; like

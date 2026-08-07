@@ -326,6 +326,8 @@ class Main(QMainWindow):
         if self.live:
             self.service.sample_once()
             self.store = self.service.store
+            if self.view.store is not self.store:
+                self.view.store = self.store
             self.recorder = self.service.recorder
         self.view.update_range()
         self.refresh()
