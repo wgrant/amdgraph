@@ -149,11 +149,16 @@ PANES = [
         ("gfx_clk", "gfx (SMU, instant)", "gfx_clk_max", True),
         ("sclk_hw", "sclk (DPM level)", None),
     ], note="SMU samples instantaneously; DPM reports a coarse level"),
+    # mem/swap are host OS figures, not SMU telemetry -- they read the same on
+    # any Linux box, which is why they are also the only two series here that
+    # still move on a machine with no ryzen_smu or amdgpu at all (a container).
     PaneSpec("Utilisation", "%", [
         ("cpu_busy", "CPU busy", None),
         ("gpu_busy", "GPU busy", None),
         ("core_c0_mean", "mean C0", None),
         ("core_cc6_mean", "mean C6", None),
+        ("mem_used_pct", "memory used", None),
+        ("swap_used_pct", "swap used", None),
     ]),
     # VID carries no limit line. Index 28 is a "VID limit" by the APU table
     # convention, but on this part it jitters and the value at index 29

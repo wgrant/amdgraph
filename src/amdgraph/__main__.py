@@ -33,15 +33,25 @@ def main():
                     help="seconds between samples (default 1.0)")
     ap.add_argument("--open", metavar="FILE",
                     help="open a recorded session instead of sampling")
+    ap.add_argument("--replay", metavar="FILE",
+                    help="drive a live Sampler from a filesystem recording "
+                         "made by tools/amdgraph-record, instead of the "
+                         "real machine")
     args = ap.parse_args()
 
     _check_deps()
     from PyQt6.QtWidgets import QApplication
     from .window import Main
 
+    source = None
+    if args.replay:
+        from .sampler import Sampler
+        from .sysfs import ReplayFS
+        source = Sampler(fs=ReplayFS.load(args.replay))
+
     app = QApplication(sys.argv)
     app.setApplicationName("amdgraph")
-    w = Main(max(0.1, args.interval), args.open)
+    w = Main(max(0.1, args.interval), args.open, source=source)
     w.show()
     return app.exec()
 

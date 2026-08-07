@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+"""Capture a real Sampler's filesystem reads, for replay without the hardware.
+
+Unlike amdgraph-probe, this deliberately imports amdgraph.sampler rather than
+re-implementing a field list: the whole point is to record exactly what the
+*real* Sampler reads, tick for tick, so there is nothing here to fall out of
+sync as sample() grows. (sampler.py and backends/ import no Qt or numpy, so
+this stays usable without a display -- see the "no Qt below layer 2" rule in
+src/amdgraph/__init__.py.)
+
+Read-only, same as the program itself: RecordingFS only wraps read_text,
+read_bytes, glob and listdir.
+
+    tools/amdgraph-record -n 120 -i 1.0 -o capture.json
+
+Replay it with amdgraph.sysfs.ReplayFS.load(path), passed to Sampler(fs=...),
+or point the program itself at it with `amdgraph --replay capture.json`. The
+saved file is a flat, hand-editable JSON log -- to manufacture an exceptional
+condition that didn't happen to occur during the capture (a device vanishing,
+a truncated read), find the record for that path and edit `values` directly.
+"""
+
+import argparse
+import os
+import socket
+import sys
+import time
+
+sys.path.insert(0, os.path.join(
+    os.path.dirname(os.path.dirname(os.path.realpath(__file__))), "src"))
+
+from amdgraph.sampler import Sampler                       # noqa: E402
+from amdgraph.sysfs import RealFS, RecordingFS              # noqa: E402
+
+
+def capture(fs, n, interval):
+    """Drives a real Sampler for `n` ticks at `interval` seconds, through
+    `fs`. Returns (the Sampler, the list of per-tick sample dicts) -- the
+    Sampler so a caller can also inspect notes()/meta(), the samples so a
+    replay can be checked against what was actually read without guessing at
+    tick boundaries afterwards.
+
+    Driving the real background ThrottleSampler thread here too (rather than
+    calling _pm()/_throttle() directly) means its natural read cadence gets
+    captured, not one synchronized to the main tick -- the same asynchrony a
+    replay of this capture will reproduce.
+    """
+    s = Sampler(fs=fs)
+    samples = []
+    for i in range(n):
+        if i:
+            time.sleep(interval)
+        samples.append(s.sample())
+    return s, samples
+
+
+def main():
+    ap = argparse.ArgumentParser(
+        description="Capture a real Sampler's filesystem reads for replay.",
+        formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
+    ap.add_argument("-n", "--samples", type=int, default=60)
+    ap.add_argument("-i", "--interval", type=float, default=1.0)
+    ap.add_argument("-o", "--out", default="capture.json")
+    args = ap.parse_args()
+
+    fs = RecordingFS(RealFS())
+    print(f"capturing {args.samples} samples at {args.interval}s "
+          f"({args.samples * args.interval:.0f}s)…", file=sys.stderr)
+    s, _samples = capture(fs, args.samples, args.interval)
+    notes = s.notes()
+    meta = s.meta()
+    s.close()
+
+    fs.save(args.out, host=socket.gethostname())
+    print(f"wrote {args.out} ({os.path.getsize(args.out) / 1024:.0f} KiB)",
+          file=sys.stderr)
+    print(f"  meta   {meta}", file=sys.stderr)
+    print(f"  notes  {notes or '(none)'}", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

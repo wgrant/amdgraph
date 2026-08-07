@@ -52,6 +52,11 @@ def probe():
 
 
 @pytest.fixture(scope="session")
+def record():
+    return load_tool("amdgraph-record")
+
+
+@pytest.fixture(scope="session")
 def qapp():
     """One QApplication for the whole run, or skip if Qt is not installed."""
     QtWidgets = pytest.importorskip("PyQt6.QtWidgets")

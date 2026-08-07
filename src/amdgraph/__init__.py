@@ -18,9 +18,11 @@ the same glance, not in two separate windows.
 
 Sessions can be recorded to disk and reloaded, either on their own or as a ghost
 behind the live trace, so "did that ryzenadj change actually help" has an answer
-rather than an impression.
+rather than an impression. A filesystem capture made by tools/amdgraph-record
+can stand in for the machine itself, which is what makes it possible to develop
+amdgraph somewhere with no AMD part in it.
 
-    amdgraph [--interval SECONDS] [--open FILE]
+    amdgraph [--interval SECONDS] [--open FILE] [--replay FILE]
 
 Keys:  space freeze   r reset   m mark   Esc unzoom   [ ] window   q quit
 

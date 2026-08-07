@@ -168,6 +168,21 @@ checker missed and which run fine at runtime.
 0% coverage — it constructed its own `Sampler`, so it could not exist without
 the right hardware. The same seam is what a second platform plugs into.
 
+### The filesystem is injected too
+
+`Sampler` takes an `fs=` (`RealFS`/`RecordingFS`/`ReplayFS` in `sysfs.py`), one
+layer below `source=`. Before this, exercising the real decode logic —
+version guards, the throttle poller, hwmon/DRM discovery — against anything
+but the literal machine underneath meant hand-authoring a synthetic
+`tmp_path` tree per test, one narrow case at a time. `RecordingFS` captures
+what a real machine's filesystem returned over a real session;
+`tools/amdgraph-record` drives a real `Sampler` through one. `ReplayFS`
+serves that capture back to an unmodified `Sampler`, so a real exceptional
+condition — the SMU module disappearing mid-session, a `gpu_metrics` version
+this build refuses — replays deterministically without the hardware doing it
+again, and `amdgraph --replay` makes it possible to develop and manually run
+the program somewhere with no AMD part in it at all.
+
 ---
 
 ## Open questions

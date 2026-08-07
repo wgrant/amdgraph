@@ -108,6 +108,28 @@ the pm_table version into the recording header itself. Each of those is exactly
 what a second backend would do differently, so the same change that made the
 window testable is the one a second platform needs. See `docs/HARDWARE.md`.
 
+## The filesystem backend
+
+One layer below the source protocol, `Sampler` itself takes an `fs=`
+implementing four primitives -- `read_text`, `read_bytes`, `glob`, `listdir`
+-- in `src/amdgraph/sysfs.py`. `RealFS` is the only one used outside
+development: it is what every read in `sampler.py` goes through instead of a
+bare `open()`/`glob.glob()`/`os.listdir()`.
+
+`RecordingFS` wraps another `FS` and logs every call, in order, keyed by
+`(op, path)`. `tools/amdgraph-record` drives a real `Sampler` through one for
+a session and saves the log as a flat, hand-editable JSON file. `ReplayFS`
+serves that log back to an unmodified `Sampler` -- each `(op, path)` has its
+own cursor, so the Nth read of a path gets the Nth recorded value and holds at
+the last one once the sequence runs out.
+
+This is what makes it possible to develop and manually run `amdgraph
+--replay capture.json` against something that behaves like a real Phoenix
+with no AMD part underneath, and to reproduce an exceptional condition --
+`ryzen_smu` disappearing mid-session, a `gpu_metrics` version the build does
+not decode -- deterministically, by editing the one JSON record for the path
+in question rather than waiting for the hardware to misbehave again.
+
 ## Rendering
 
 Panes are declarative. `panes.py` lists what is plotted, against which ceiling,

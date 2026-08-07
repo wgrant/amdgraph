@@ -165,6 +165,14 @@ THROTTLE_BITS = [
 TPACPI = "/sys/devices/platform/thinkpad_acpi"
 PLATFORM_PROFILE = "/sys/firmware/acpi/platform_profile"
 
+# Generic kernel ABI, not part-specific -- no version to gate on, unlike
+# pm_table and gpu_metrics above. Useful on any machine, including one with no
+# AMD silicon at all: a container has no ryzen_smu and no amdgpu, but it still
+# has memory pressure, which is what makes it possible to develop the rest of
+# this program somewhere other than the hardware it targets.
+PROC_MEMINFO = "/proc/meminfo"
+PROC_STAT = "/proc/stat"
+
 # Plotted as a step trace so a profile switch lines up against the power drop
 # it caused. Ordered by how much power each profile allows.
 PROFILES = {"low-power": 0.0, "quiet": 0.0, "cool": 0.0,

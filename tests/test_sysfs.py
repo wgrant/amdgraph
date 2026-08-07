@@ -9,8 +9,9 @@ import pytest
 from conftest import gm_blob
 
 from amdgraph.sampler import Sampler
-from amdgraph.sysfs import (card_index, dpm_current, find_drm_device,
-                            find_hwmon, read_num, read_text)
+from amdgraph.sysfs import (RealFS, RecordingFS, ReplayFS, card_index,
+                            dpm_current, find_drm_device, find_hwmon,
+                            read_num, read_text)
 
 AMD, INTEL = "0x1002", "0x8086"
 V1_X = dict(fmt_rev=1, cont_rev=3, size=160)      # a discrete Radeon
@@ -175,3 +176,58 @@ def test_read_num_scales_and_rejects_junk(tmp_path):
     assert read_num(str(p), 1000) == 72.0
     p.write_text("not a number\n")
     assert read_num(str(p)) is None
+
+
+class TestRecordingReplay:
+    """RecordingFS wraps a real read and logs it; ReplayFS serves the log
+    back. Together they let a real machine's exceptional conditions -- a
+    miss, a truncated blob, a device that stops enumerating -- be captured
+    once and replayed deterministically forever, without the hardware."""
+
+    def test_round_trips_text_bytes_glob_and_listdir(self, tmp_path):
+        # A subdirectory, so nothing written by the test itself (like the
+        # capture file below) shows up in what gets recorded or replayed.
+        root = tmp_path / "sys"
+        root.mkdir()
+        (root / "temp1_input").write_text("45000\n")
+        (root / "hwmon0").mkdir()
+        (root / "hwmon1").mkdir()
+        gm = gm_blob()
+
+        rec = RecordingFS(RealFS())
+        assert rec.read_text(str(root / "temp1_input")) == "45000"
+        assert rec.read_bytes(str(root / "pm_table")) is None        # a miss
+        (root / "pm_table").write_bytes(gm)
+        assert rec.read_bytes(str(root / "pm_table")) == gm
+        want_glob = sorted(rec.glob(str(root / "hwmon*")))
+        want_listdir = sorted(rec.listdir(str(root)))
+        assert want_glob == sorted(str(root / h) for h in ("hwmon0", "hwmon1"))
+        assert want_listdir == sorted(f.name for f in root.iterdir())
+
+        out = tmp_path / "capture.json"
+        rec.save(str(out), host="test-host")
+        replayed = ReplayFS.load(str(out))
+
+        assert replayed.read_text(str(root / "temp1_input")) == "45000"
+        assert replayed.read_bytes(str(root / "pm_table")) is None
+        assert replayed.read_bytes(str(root / "pm_table")) == gm
+        assert sorted(replayed.glob(str(root / "hwmon*"))) == want_glob
+        assert sorted(replayed.listdir(str(root))) == want_listdir
+
+    def test_exhausted_sequence_holds_the_last_value(self):
+        fs = ReplayFS({("text", "/x"): ["1", "2", "3"]})
+        assert [fs.read_text("/x") for _ in range(5)] == \
+            ["1", "2", "3", "3", "3"]
+
+    def test_unrecorded_path_reads_as_a_miss(self):
+        fs = ReplayFS({})
+        assert fs.read_text("/never/recorded") is None
+        assert fs.read_bytes("/never/recorded") is None
+        assert fs.glob("/never/recorded/*") == []
+        assert fs.listdir("/never/recorded") == []
+
+    def test_read_num_is_derived_from_read_text_on_every_backend(self):
+        """FS.read_num is implemented once, in the base class -- a backend
+        only has to get read_text right."""
+        fs = ReplayFS({("text", "/v"): ["72000"]})
+        assert fs.read_num("/v", 1000) == 72.0

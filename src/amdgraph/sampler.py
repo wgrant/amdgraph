@@ -14,21 +14,20 @@ import time
 from .fields import (AMD_VENDOR, DRM_DEVICES, GM_CORE_PWR_OFF, GM_PWR_OFF,
                      GM_SIZE, GM_THROTTLE_OFF, GM_VERSION, N_CORES,
                      PLATFORM_PROFILE, PM_CORE, PM_SCALAR, PM_TABLE,
-                     PM_VERSION, PM_VER_SUPPORTED, PROFILES, THROTTLE_BITS,
-                     TPACPI)
-from .sysfs import (dpm_current, find_drm_device, find_hwmon, read_num,
-                    read_text)
+                     PM_VERSION, PM_VER_SUPPORTED, PROC_MEMINFO, PROC_STAT,
+                     PROFILES, THROTTLE_BITS, TPACPI)
+from .sysfs import RealFS, dpm_current, find_drm_device, find_hwmon
 
 
 class CPUBusy:
     """Aggregate non-idle time from /proc/stat, differenced between samples."""
 
-    def __init__(self):
+    def __init__(self, fs):
+        self.fs = fs
         self.prev = self._read()
 
-    @staticmethod
-    def _read():
-        txt = read_text("/proc/stat")
+    def _read(self):
+        txt = self.fs.read_text(PROC_STAT)
         if not txt:
             return None
         f = [int(x) for x in txt.splitlines()[0].split()[1:]]
@@ -41,6 +40,38 @@ class CPUBusy:
         dt, di = cur[0] - self.prev[0], cur[1] - self.prev[1]
         self.prev = cur
         return 100.0 * (dt - di) / dt if dt else None
+
+
+def host_memory(fs):
+    """Used memory and swap, as percentages, from /proc/meminfo.
+
+    MemAvailable rather than MemFree: free-but-reclaimable page cache is not
+    memory pressure, and MemFree alone makes an idle Linux box with a warm
+    cache look nearly out of RAM. MemAvailable has counted that in since 3.14.
+
+    No differencing, no privileges, no ASIC to be wrong about -- unlike
+    everything else in this module, this is the same read on every Linux box
+    there is, which is what makes it a usable stand-in for real sensors when
+    developing somewhere with no AMD part underneath.
+    """
+    txt = fs.read_text(PROC_MEMINFO)
+    if not txt:
+        return None, None
+    kb = {}
+    for line in txt.splitlines():
+        name, _, rest = line.partition(":")
+        try:
+            kb[name] = int(rest.split()[0])
+        except (IndexError, ValueError):
+            continue
+    mem = swap = None
+    total, avail = kb.get("MemTotal"), kb.get("MemAvailable")
+    if total:
+        mem = 100.0 * (total - avail) / total if avail is not None else None
+    total, free = kb.get("SwapTotal"), kb.get("SwapFree")
+    if total:                      # 0 on a swapless container; not a reading
+        swap = 100.0 * (total - free) / total if free is not None else None
+    return mem, swap
 
 
 class ThrottleSampler:
@@ -61,8 +92,9 @@ class ThrottleSampler:
     but tunable, and set to 1 Hz it degrades to the old instantaneous sample.
     """
 
-    def __init__(self, gpu_metrics, hz=20.0):
+    def __init__(self, gpu_metrics, fs=None, hz=20.0):
         self.gpu_metrics = gpu_metrics
+        self.fs = fs or RealFS()
         self.hz = hz
         self._lock = threading.Lock()
         self._counts = {b: 0.0 for b, _n, _f in THROTTLE_BITS}
@@ -100,11 +132,11 @@ class ThrottleSampler:
         period = 1.0 / self.hz
         nxt = time.monotonic()
         while not self._stop.is_set():
+            raw = self.fs.read_bytes(self.gpu_metrics)
             try:
-                with open(self.gpu_metrics, "rb") as f:
-                    raw = f.read()
-                ts = struct.unpack_from("<I", raw, GM_THROTTLE_OFF)[0]
-            except (OSError, struct.error):
+                ts = (None if raw is None else
+                     struct.unpack_from("<I", raw, GM_THROTTLE_OFF)[0])
+            except struct.error:
                 ts = None
             if ts is not None:
                 sock, _cpu, soc, gfx = struct.unpack_from("<HHHH", raw,
@@ -186,33 +218,40 @@ class Sampler:
         Always reads the first time it is asked for, so a decimated sensor is
         never blank for the opening samples of a recording."""
         if key not in self.slow or self.tick % self.SLOW_EVERY == 0:
-            self.slow[key] = read_num(path, scale)
+            self.slow[key] = self.fs.read_num(path, scale)
         return self.slow[key]
 
-    def __init__(self):
-        self.hwmon = find_hwmon()
-        self.cpubusy = CPUBusy()
+    def __init__(self, fs=None):
+        self.fs = fs or RealFS()
+        self.hwmon = find_hwmon(fs=self.fs)
+        self.cpubusy = CPUBusy(self.fs)
         self.tick = 0
         self.slow = {}
         self.pm_ok = False
         self.pm_note = ""
         self.card = find_drm_device(
             DRM_DEVICES, AMD_VENDOR,
-            lambda dev: self._check_gpu_metrics(f"{dev}/gpu_metrics")[0])
+            lambda dev: self._check_gpu_metrics(f"{dev}/gpu_metrics",
+                                                self.fs)[0],
+            fs=self.fs)
         self.gpu_metrics = (f"{self.card}/gpu_metrics" if self.card else None)
-        self.gm_ok, self.gm_note = self._check_gpu_metrics(self.gpu_metrics)
+        self.gm_ok, self.gm_note = self._check_gpu_metrics(self.gpu_metrics,
+                                                            self.fs)
         # The poller is handed a path only when the layout checked out. Gating
         # solely on the start() call below is not enough: changing the cap-poll
         # rate in the toolbar calls set_rate(), which calls start() again, and
         # a decode we already refused would come back to life at up to 50 Hz --
         # burning ~1.2% of a core unpacking offsets that mean nothing on this
         # part. Withholding the path is the one guard every caller goes through.
-        self.throttle = ThrottleSampler(self.gpu_metrics if self.gm_ok else None)
+        self.throttle = ThrottleSampler(
+            self.gpu_metrics if self.gm_ok else None, self.fs)
         self.throttle.start()
+        raw = self.fs.read_bytes(PM_VERSION)
         try:
-            with open(PM_VERSION, "rb") as f:
-                ver = struct.unpack("<I", f.read(4))[0]
-        except (OSError, struct.error):
+            ver = None if raw is None else struct.unpack("<I", raw[:4])[0]
+        except struct.error:
+            ver = None
+        if ver is None:
             self.pm_note = ("ryzen_smu not loaded -- SMU panes are empty. "
                             "modprobe ryzen_smu to populate them.")
             return
@@ -224,7 +263,7 @@ class Sampler:
         self.pm_ok = True
 
     @staticmethod
-    def _check_gpu_metrics(path):
+    def _check_gpu_metrics(path, fs=None):
         """Refuse to decode a layout we have not verified. The throttler bits
         are ASIC-dependent and the field moves between revisions, so a wrong
         guess would label the wrong cap reason -- worse than showing none.
@@ -237,10 +276,8 @@ class Sampler:
         """
         if not path:
             return False, "no amdgpu device found — no cap reasons"
-        try:
-            with open(path, "rb") as f:
-                raw = f.read()
-        except OSError:
+        raw = (fs or RealFS()).read_bytes(path)
+        if raw is None:
             return False, "gpu_metrics unavailable — no cap reasons"
         if len(raw) < 4:
             return False, "gpu_metrics too short — no cap reasons"
@@ -254,10 +291,8 @@ class Sampler:
     def _pm(self, s):
         if not self.pm_ok:
             return
-        try:
-            with open(PM_TABLE, "rb") as f:
-                raw = f.read()
-        except OSError:
+        raw = self.fs.read_bytes(PM_TABLE)
+        if raw is None:
             return
         n = len(raw) // 4
         v = struct.unpack(f"<{n}f", raw[:n * 4])
@@ -323,12 +358,8 @@ class Sampler:
             for bit, _name, _fam in THROTTLE_BITS:
                 s[f"thr{bit}"] = duty.get(bit, 0.0)
             return
-        try:
-            with open(self.gpu_metrics, "rb") as f:
-                buf = f.read()
-        except OSError:
-            return
-        if len(buf) < GM_THROTTLE_OFF + 4:
+        buf = self.fs.read_bytes(self.gpu_metrics)
+        if buf is None or len(buf) < GM_THROTTLE_OFF + 4:
             return
         ts = struct.unpack_from("<I", buf, GM_THROTTLE_OFF)[0]
         s["throttle_raw"] = float(ts)
@@ -343,26 +374,27 @@ class Sampler:
         self._throttle(s)
 
         s["cpu_busy"] = self.cpubusy.sample()
+        s["mem_used_pct"], s["swap_used_pct"] = host_memory(self.fs)
         if self.card:
-            s["gpu_busy"] = read_num(f"{self.card}/gpu_busy_percent")
-            s["sclk"] = dpm_current(f"{self.card}/pp_dpm_sclk")
-            s["socclk"] = dpm_current(f"{self.card}/pp_dpm_socclk")
+            s["gpu_busy"] = self.fs.read_num(f"{self.card}/gpu_busy_percent")
+            s["sclk"] = dpm_current(f"{self.card}/pp_dpm_sclk", self.fs)
+            s["socclk"] = dpm_current(f"{self.card}/pp_dpm_socclk", self.fs)
 
         if (amd := self.hwmon.get("amdgpu")):
-            s["gpu_edge"] = read_num(f"{amd}/temp1_input", 1000)
+            s["gpu_edge"] = self.fs.read_num(f"{amd}/temp1_input", 1000)
             # The driver's own sclk readout, in Hz. This is the achieved GPU
             # clock; the SMU's permitted ceiling is a different number.
-            s["sclk_hw"] = read_num(f"{amd}/freq1_input", 1_000_000)
-            w = read_num(f"{amd}/power1_average", 1_000_000)
+            s["sclk_hw"] = self.fs.read_num(f"{amd}/freq1_input", 1_000_000)
+            w = self.fs.read_num(f"{amd}/power1_average", 1_000_000)
             if w is None:
-                w = read_num(f"{amd}/power1_input", 1_000_000)
+                w = self.fs.read_num(f"{amd}/power1_input", 1_000_000)
             s["gpu_power"] = w
         if (tp := self.hwmon.get("thinkpad")):
             # temp5 is the EC's TMP3 sensor (EC RAM 0x7C) -- the palm-rest skin
             # temperature the firmware fan curve reacts to, and the closest EC
             # analogue of the SMU's STT model. temp1 is its CPU sensor.
-            s["ec_skin"] = read_num(f"{tp}/temp5_input", 1000)
-            s["ec_cpu"] = read_num(f"{tp}/temp1_input", 1000)
+            s["ec_skin"] = self.fs.read_num(f"{tp}/temp5_input", 1000)
+            s["ec_cpu"] = self.fs.read_num(f"{tp}/temp1_input", 1000)
             # Only these two. temp1/3/6/7 all report the identical value and
             # track each other exactly -- they are aliases of one CPU sensor,
             # so the EC publishes just two distinct temperatures to Linux.
@@ -373,21 +405,21 @@ class Sampler:
             # halves edc_lim (105 -> 52 A, ~8 W) and correlates with none of
             # the sensors Linux can see. It is not hiding in an unread
             # thermistor: there aren't any. The EC decides privately.
-            s["palm"] = read_num(f"{TPACPI}/palmsensor")
-            s["fan1"] = read_num(f"{tp}/fan1_input")
-            s["fan2"] = read_num(f"{tp}/fan2_input")
-            s["fan_cmd"], s["fan_mode"] = self._fan_command(tp)
+            s["palm"] = self.fs.read_num(f"{TPACPI}/palmsensor")
+            s["fan1"] = self.fs.read_num(f"{tp}/fan1_input")
+            s["fan2"] = self.fs.read_num(f"{tp}/fan2_input")
+            s["fan_cmd"], s["fan_mode"] = self._fan_command(tp, self.fs)
         if (nv := self.hwmon.get("nvme")):
             s["nvme"] = self._slow("nvme", f"{nv}/temp1_input", 1000)
         if (bat := self.hwmon.get("BAT0")):
-            s["batt_power"] = read_num(f"{bat}/power1_input", 1_000_000)
+            s["batt_power"] = self.fs.read_num(f"{bat}/power1_input", 1_000_000)
 
         # Platform policy. Any of these can move the power budget out from
         # under you without the SMU rows showing a cause, so they belong on
         # the same timeline as the drop they explain.
-        s["pprof"] = PROFILES.get(read_text(PLATFORM_PROFILE) or "")
-        s["lapmode"] = read_num(f"{TPACPI}/dytc_lapmode")
-        st = read_text("/sys/class/power_supply/BAT0/status")
+        s["pprof"] = PROFILES.get(self.fs.read_text(PLATFORM_PROFILE) or "")
+        s["lapmode"] = self.fs.read_num(f"{TPACPI}/dytc_lapmode")
+        st = self.fs.read_text("/sys/class/power_supply/BAT0/status")
         s["batt_charging"] = None if st is None else float(st == "Charging")
         # ~0.5 ms, an order of magnitude dearer than its neighbours.
         s["ac_online"] = self._slow("ac", "/sys/class/power_supply/AC/online")
@@ -415,13 +447,13 @@ class Sampler:
     def reset(self):
         """Drop differencing state. Called when the buffer is cleared, so the
         first sample afterwards is not a delta against a stale baseline."""
-        self.cpubusy = CPUBusy()
+        self.cpubusy = CPUBusy(self.fs)
 
     def close(self):
         self.throttle.stop()
 
     @staticmethod
-    def _fan_command(tp):
+    def _fan_command(tp, fs=None):
         """(level, mode) as COMMANDED by software, not as achieved.
 
         thinkpad_acpi maps pwm1_enable 0 to "disengaged" (fan unrestricted), 2
@@ -434,12 +466,13 @@ class Sampler:
         axis makes the lag between what the fan daemon asks for and what the
         fan does readable straight off the two traces.
         """
-        mode = read_num(f"{tp}/pwm1_enable")
+        fs = fs or RealFS()
+        mode = fs.read_num(f"{tp}/pwm1_enable")
         if mode is None:
             return None, None
         if mode == 0:
             return 8.0, "FULL"
         if mode == 2:
             return None, "AUTO"
-        pwm = read_num(f"{tp}/pwm1")
+        pwm = fs.read_num(f"{tp}/pwm1")
         return (None, None) if pwm is None else (round(pwm * 7 / 255), None)
