@@ -36,24 +36,28 @@ absolute, and plain `import amdgraph.x` alike, because the launcher puts `src/`
 on `sys.path` and all three forms run.
 
 ```
-0  fields  sysfs        the hardware map; sysfs readers that know nothing of it
-1  sampler  store       one tick -> one dict; NaN-filled numpy columns
+0  fields  sysfs        the hardware map; sysfs readers (and FS backends) that
+                        know nothing of it
+1  backends             one module per hardware family, each deciding for
+                        itself whether it applies to this machine
+2  sampler  store       one tick -> one dict; NaN-filled numpy columns
                         ── no Qt below this line ──
-2  session panes        the CSV format; the pane catalogue
+3  session panes        the CSV format; the pane catalogue
    palette view         colours; the shared time window
-3  render               axis ranges, formatting, polylines, raster column-hold
-4  timepane             base: time projection + zoom/pan/crosshair gestures
+4  render               axis ranges, formatting, polylines, raster column-hold
+5  timepane             base: time projection + zoom/pan/crosshair gestures
    chart rasters axis   the three kinds of pane, and the ruler
-5  window  __main__     assembly; argparse and QApplication
+6  window  __main__     assembly; argparse and QApplication
 ```
 
-The "no Qt below layer 1" rule is checked, not just stated. It means a
+The "no Qt below layer 2" rule is checked, not just stated. It means a
 recording can be produced or read headlessly, and it is why `--help` works on a
 machine with neither numpy nor PyQt6 installed.
 
 Two rules the numbering cannot express, both declared in the checker:
-`chart` and `rasters` may import `timepane` (their base class), and `__main__`
-may import `window`.
+`chart` and `rasters` may import `timepane` (their base class), each backend
+module may import `backends.base` (likewise), and `__main__` may import
+`window`.
 
 ## Data flow
 
@@ -64,7 +68,7 @@ sysfs ──> Sampler.sample() ──> dict[str, float] ──> Store (numpy col
                                                               via View
 ```
 
-One tick produces one flat dict. That is the only shape anything above layer 1
+One tick produces one flat dict. That is the only shape anything above layer 2
 sees, which is what makes a recording and a live session interchangeable: `Open`
 swaps `View.store` for one loaded from disk and every pane follows, with the
 live buffer left untouched underneath.
@@ -97,8 +101,12 @@ adjustable in the toolbar; at 1 Hz the thread does not run at all.
 | `reset()` | forget differencing state; the buffer was cleared |
 | `close()` | stop background threads |
 
-`Sampler` is the implementation that reads this machine. Anything specific to
-how a *particular* part is read belongs behind those six methods.
+`Sampler` is the implementation that reads this machine -- or rather,
+composes what `backends/` reads: it discovers which backend modules apply at
+construction and calls the same six methods (where they exist) on each,
+merging their sample dicts into one. Anything specific to how a *particular*
+part is read belongs behind a backend's own methods, not here; see
+`src/amdgraph/backends/base.py` and "Adding a part" in `docs/HARDWARE.md`.
 
 This seam was added because the window had no tests: it constructed its own
 `Sampler`, so it could not exist without a Phoenix underneath. It had also been
@@ -110,11 +118,12 @@ window testable is the one a second platform needs. See `docs/HARDWARE.md`.
 
 ## The filesystem backend
 
-One layer below the source protocol, `Sampler` itself takes an `fs=`
-implementing four primitives -- `read_text`, `read_bytes`, `glob`, `listdir`
--- in `src/amdgraph/sysfs.py`. `RealFS` is the only one used outside
-development: it is what every read in `sampler.py` goes through instead of a
-bare `open()`/`glob.glob()`/`os.listdir()`.
+One layer below the backends, each of them takes an `fs=` implementing four
+primitives -- `read_text`, `read_bytes`, `glob`, `listdir` -- in
+`src/amdgraph/sysfs.py` (`Sampler` just holds the one instance and passes it
+through). `RealFS` is the only one used outside development: it is what
+every read in `backends/*.py` goes through instead of a bare
+`open()`/`glob.glob()`/`os.listdir()`.
 
 `RecordingFS` wraps another `FS` and logs every call, in order, keyed by
 `(op, path)`. `tools/amdgraph-record` drives a real `Sampler` through one for

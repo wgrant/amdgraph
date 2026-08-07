@@ -48,32 +48,42 @@ budget, so a cycle is visible where it is introduced rather than at import time.
      fields    pm_table indices, gpu_metrics offsets, throttler bits, paths.
                Everything here was checked against live silicon; the comments
                are the evidence and are the most valuable thing in the tree.
-     sysfs     open/read/parse helpers that know nothing about any field.
+     sysfs     open/read/parse helpers that know nothing about any field,
+               plus the FS backends (Real/Recording/Replay) that make it
+               possible to develop and test without the hardware.
 
-  1. acquisition and storage -- no Qt below this line
-     sampler   Sampler (one tick -> one dict), plus the off-thread throttler
-               poller and the /proc/stat differ.
+  1. hardware backends -- no Qt below this line either
+     backends  one module per hardware family (host, platform, zen_smu,
+               amdgpu), each deciding for itself whether it applies to the
+               running machine. See backends/base.py and docs/DESIGN.md.
+               Adding a platform or a GPU vendor is a new module here, not a
+               change to anything above it.
+
+  2. acquisition and storage -- still no Qt
+     sampler   Sampler (one tick -> one dict): discovers which backends apply
+               and composes their output. Knows nothing about how any of
+               them read anything.
      store     Store: NaN-filled numpy column store, the in-memory format.
 
-  2. session and presentation policy -- still no widgets
+  3. session and presentation policy -- still no widgets
      session   CSV recording and playback, and which keys get recorded.
      panes     the pane catalogue: what is plotted, against what ceiling, with
                what caveat. Declarative; contains no drawing code.
      palette   colours, validated against the chart surface.
      view      the time window, crosshair and overlay every pane shares.
 
-  3. drawing primitives
+  4. drawing primitives
      render    axis ranges, number and time formatting, polyline building,
                raster column-hold. Free functions over numpy and QPainter.
 
-  4. widgets, one per kind of pane
+  5. widgets, one per kind of pane
      timepane  the base every pane shares: time projection and the zoom, pan
                and crosshair gestures.
      chart     ChartPane, the line-chart pane driven by a PaneSpec.
      rasters   ThrottlePane and CorePane, the two QImage strip charts.
      axis      TimeAxis, the shared ruler pinned below the scroll area.
 
-  5. assembly
+  6. assembly
      window    Main: builds the pane column, owns the sample timer, wires the
                toolbar to the layers below.
      __main__  argument parsing and QApplication.

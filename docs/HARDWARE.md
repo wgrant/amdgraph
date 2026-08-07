@@ -178,8 +178,12 @@ SoC.
    which are guessed, and only earned ones should plot by default. This does not
    exist yet and is the right shape for the `fields/` package.
 
-4. **Write a backend, not an edit.** Implement the six-method source protocol
-   (`docs/DESIGN.md`). Nothing in layers 2–5 should need to change.
+4. **Write a backend, not an edit.** A module in `src/amdgraph/backends/`
+   implementing `Backend` (`backends/base.py`) plus a module-level `probe(fs)`
+   that decides whether it applies -- `zen_smu.py` and `amdgpu.py` are the
+   templates, one version-gated blob each. Add it to `Sampler`'s `_PROBES`
+   tuple. Nothing in layers 3–6 should need to change, and nothing in another
+   backend module either -- that isolation is the whole point of the split.
 
 5. **Make the pane catalogue conditional.** `PANES` is currently unconditional;
    it needs to drop series whose key never appears and panes left empty.
@@ -202,7 +206,7 @@ second pane catalogue, not a profile.
 
 Strix Halo exposes DF traffic counters per port — to each CCX, the GPU, and
 other peripherals. These are **monotonic counters** needing setup, held state
-and differencing, not stateless sysfs polls, so they break the shape layer 1
+and differencing, not stateless sysfs polls, so they break the shape layer 2
 currently assumes. On this Phoenix (**measured**) `amd_df` is not even
 registered — only `amd_iommu_0`, `power`, `power_core`, `ibs_*` — and
 `perf_event_paranoid` is 4, so unprivileged perf is off entirely. Reading them

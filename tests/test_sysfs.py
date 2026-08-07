@@ -8,7 +8,7 @@ shape of machine rather than the one on the desk.
 import pytest
 from conftest import gm_blob
 
-from amdgraph.sampler import Sampler
+from amdgraph.backends.amdgpu import check_gpu_metrics
 from amdgraph.sysfs import (RealFS, RecordingFS, ReplayFS, card_index,
                             dpm_current, find_drm_device, find_hwmon,
                             read_num, read_text)
@@ -19,7 +19,7 @@ V3_0 = dict(fmt_rev=3, cont_rev=0, size=400)      # Strix Point / Strix Halo
 
 
 def decodable(dev):
-    return Sampler._check_gpu_metrics(f"{dev}/gpu_metrics")[0]
+    return check_gpu_metrics(f"{dev}/gpu_metrics", RealFS())[0]
 
 
 @pytest.fixture

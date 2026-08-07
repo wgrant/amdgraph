@@ -183,6 +183,26 @@ this build refuses — replays deterministically without the hardware doing it
 again, and `amdgraph --replay` makes it possible to develop and manually run
 the program somewhere with no AMD part in it at all.
 
+### Sampler split into a backends package
+
+One module per hardware family (`host`, `platform`, `zen_smu`, `amdgpu`) under
+`src/amdgraph/backends/`, each with a `probe(fs)` deciding for itself whether
+it applies. `Sampler` composes whichever backends probe true; it is layer 2,
+backends are a new layer 1 between it and `fields`/`sysfs`, not a same-layer
+exception -- `Sampler` composing implementations is a real hierarchy, the
+same relationship `__main__`/`window` do not have (they are peers, which is
+why that one *is* a same-layer exception).
+
+Done now rather than speculatively earlier because a concrete second and
+third platform are both arriving at once: a Strix Halo host (different
+pm_table version, `gpu_metrics v3_0`'s residency-counter strategy instead of
+a bitmask, 16 cores over two CCDs, almost certainly not `thinkpad_acpi`) and
+an RTX 3070 over Thunderbolt (a vendor with no representation in this
+program at all, and no sysfs precedent checked yet for how much of it is
+readable without a subprocess). Splitting first, against hardware already in
+hand and already verified, means the actual new decoding lands as new
+modules rather than edits threaded through one growing `sample()` method.
+
 ---
 
 ## Open questions
