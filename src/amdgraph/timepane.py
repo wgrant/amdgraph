@@ -17,6 +17,7 @@ from PyQt6.QtCore import QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QImage, QPainter, QPen
 from PyQt6.QtWidgets import QWidget
 
+from . import render
 from .palette import INK, PANE_BG, SERIES, alpha
 from .render import pane_font
 
@@ -34,6 +35,8 @@ class TimePane(QWidget):
         self.drag_from = None
         self.drag_to = None
         self.label_markers = False      # only the topmost pane titles them
+        self.indent = 0
+        self._rect = None
         self.setFont(pane_font())
 
     def fix_height(self, h):
@@ -41,6 +44,20 @@ class TimePane(QWidget):
         self.setMaximumHeight(h)
 
     # -- geometry ---------------------------------------------------------
+
+    def set_indent(self, px):
+        """The frame has been shifted right by `px`; give it back.
+
+        Every pane shares one time axis, so an indented pane whose plot moved
+        with it would no longer line up with the ruler or with its neighbours.
+        Narrowing the left gutter by the indent keeps the plot area at the same
+        place on screen whatever the frame does.
+        """
+        self.indent = px
+        self._rect = None
+
+    def gutter_left(self):
+        return max(10, render.LEFT - self.indent)
 
     def plot_rect(self):
         raise NotImplementedError

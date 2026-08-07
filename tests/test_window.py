@@ -20,22 +20,23 @@ from amdgraph.view import View                                 # noqa: E402
 
 class TestAssembly:
     def test_every_pane_in_the_catalogue_is_built(self, main):
-        titles = [p.spec.title for p in main.panes if hasattr(p, "spec")]
+        titles = [p.spec.title for p in main.panes if p.spec]
         assert titles == [s.title for s in PANES]
 
     def test_cap_reason_is_first_and_the_heat_strip_follows_cpu_clock(self,
                                                                      main):
-        assert isinstance(main.panes[0], ThrottlePane)
-        titles = [getattr(p, "spec", None) and p.spec.title for p in main.panes]
-        assert titles[titles.index(HEAT_AFTER) + 1] is None
-        assert isinstance(main.panes[titles.index(HEAT_AFTER) + 1], CorePane)
+        assert isinstance(main.panes[0].body, ThrottlePane)
+        titles = [p.spec.title if p.spec else None for p in main.panes]
+        at = titles.index(HEAT_AFTER) + 1
+        assert titles[at] is None
+        assert isinstance(main.panes[at].body, CorePane)
 
     def test_only_the_top_pane_labels_markers(self, main):
         assert main.panes[0].label_markers
         assert not any(p.label_markers for p in main.panes[1:])
 
     def test_every_pane_shares_one_view(self, main):
-        assert all(p.view is main.view for p in main.panes)
+        assert all(p.body.view is main.view for p in main.panes)
         assert main.axis.view is main.view
 
     def test_nothing_in_the_toolbar_steals_the_space_key(self, main):
@@ -63,7 +64,7 @@ class TestSections:
 
     def members(self, main, group):
         return [p for p in main.panes
-                if getattr(p, "spec", None) and p.spec.title in group.titles]
+                if p.spec and p.spec.title in group.titles]
 
     def test_declared_groups_get_a_header(self, main):
         assert len(main.sections) == len(GROUPS)
@@ -94,15 +95,15 @@ class TestSections:
         # The panes read the shared store, so there is nothing per-pane to
         # catch up: the history is simply there.
         assert main.store.n == 6
-        assert all(p.view is main.view for p in self.members(main,
-                                                             section.group))
+        assert all(p.body.view is main.view
+                   for p in self.members(main, section.group))
 
     def test_a_collapsed_group_leaves_the_column_shorter(self, main):
         section = main.sections[0]
         section.set_expanded(False)
-        short = sum(p.minimumHeight() for p in main.panes if not p.isHidden())
+        short = sum(p.height() for p in main.panes if not p.isHidden())
         section.set_expanded(True)
-        tall = sum(p.minimumHeight() for p in main.panes if not p.isHidden())
+        tall = sum(p.height() for p in main.panes if not p.isHidden())
         assert tall > short
 
     def test_refresh_and_render_work_either_way(self, main):

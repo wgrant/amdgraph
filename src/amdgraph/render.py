@@ -28,7 +28,8 @@ from .palette import MARKER, PANE_BG, alpha
 # Measuring the actual strings is the only thing that holds across machines.
 LEFT = 72          # y-axis gutter, and the cap-reason / per-core row labels
 RIGHT = 104        # room for end-of-line direct labels
-TOP = 26
+HEADER_H = 26      # the header row of widgets above each painted body
+TOP = 2            # breathing room at the top of the body itself
 BOTTOM = 6
 
 _DEFAULT_LEFT, _DEFAULT_RIGHT = LEFT, RIGHT

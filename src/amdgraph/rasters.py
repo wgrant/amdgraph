@@ -11,35 +11,16 @@ May import: fields, palette, panes, render, timepane.
 import numpy as np
 from PyQt6.QtCore import QPoint, QPointF, QRectF, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter
-from PyQt6.QtWidgets import QMenu
+from PyQt6.QtWidgets import QComboBox
 
 from . import render
+from .frame import PaneFrame, Readout
 from .fields import N_CORES, THROTTLE_BITS
 from .palette import (CRITICAL, INK, INK_DIM, LUT, MUTED, PANE_BG, RAMP,
                       SERIES, alpha)
 from .panes import CAP_DEFAULT, CAP_RATES, HEAT_MODES
 from .render import TOP, column_hold, draw_markers, fmt_val, row_label_font
 from .timepane import TimePane
-
-
-def choice_menu(widget, title, choices, current, apply, at):
-    """A menu of mutually exclusive choices, with the current one ticked.
-
-    Both raster panes carry a setting that governs only themselves -- what the
-    colour means, and how often the bits are sampled -- and both already name
-    their current state in their own header. So the header is the state and
-    this is the control, rather than a widget in the toolbar that is nowhere
-    near the thing it changes.
-    """
-    menu = QMenu(widget)
-    menu.addAction(title).setEnabled(False)
-    menu.addSeparator()
-    for value, label in choices:
-        act = menu.addAction(label)
-        act.setCheckable(True)
-        act.setChecked(value == current)
-        act.triggered.connect(lambda _checked, v=value: apply(v))
-    menu.exec(at)
 
 
 class ThrottlePane(TimePane):
@@ -77,102 +58,30 @@ class ThrottlePane(TimePane):
         self.label_font = row_label_font()
 
     def plot_rect(self):
-        return QRectF(render.LEFT, TOP,
-                      max(10, self.width() - render.LEFT - render.RIGHT),
+        left = self.gutter_left()
+        return QRectF(left, TOP,
+                      max(10, self.width() - left - render.RIGHT),
                       len(THROTTLE_BITS) * self.ROW)
 
     def paintEvent(self, _ev):
         p = QPainter(self)
         p.fillRect(self.rect(), PANE_BG)
         r = self.plot_rect()
-        store = self.view.store
-        fm = QFontMetrics(self.font())
-
-        self._draw_image(p, r, store)
+        self._draw_image(p, r, self.view.store)
 
         p.setFont(self.label_font)
         for i, (_bit, name, fam) in enumerate(THROTTLE_BITS):
             y = r.top() + i * self.ROW
             p.setPen(alpha(self.FAMILY[fam], 210))
-            p.drawText(QRectF(0, y, render.LEFT - 4, self.ROW),
+            p.drawText(QRectF(0, y, self.gutter_left() - 4, self.ROW),
                        Qt.AlignmentFlag.AlignRight
                        | Qt.AlignmentFlag.AlignVCenter, name)
         p.setFont(self.font())
-
-        f = QFont(self.font())
-        f.setBold(True)
-        p.setFont(f)
-        p.setPen(INK)
-        p.drawText(QRectF(6, 2, 200, TOP - 4),
-                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                   "Cap reason")
-        p.setFont(self.font())
-
-        # The rate the duty cycles below are measured over. Without it a "62%"
-        # is uninterpretable, and it is also the affordance for changing it.
-        rate = f"{self.cap_hz:g} Hz"
-        p.setPen(MUTED)
-        rx = 6 + fm.horizontalAdvance("Cap reason") + 10
-        p.drawText(QRectF(rx, 2, fm.horizontalAdvance(rate) + 4, TOP - 4),
-                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                   rate)
-
-        # Spell out what is active right now (or under the crosshair).
-        t = self.view.cursor
-        active = []
-        for bit, name, fam in THROTTLE_BITS:
-            v = (store.at(f"thr{bit}", t) if t is not None
-                 else store.latest(f"thr{bit}"))
-            if v:
-                active.append((name, fam, v))
-        active.sort(key=lambda a: -a[2])
-        x = rx + fm.horizontalAdvance(rate) + 14
-        if not active:
-            p.setPen(MUTED)
-            p.drawText(QRectF(x, 2, 300, TOP - 4),
-                       Qt.AlignmentFlag.AlignLeft
-                       | Qt.AlignmentFlag.AlignVCenter,
-                       "none — nothing is holding it back")
-        else:
-            for name, fam, v in active:
-                # The percentage is the point: a reason asserted 8% of the
-                # interval is a different situation from one asserted 95%,
-                # and both used to render identically.
-                txt = f"◀ {name} {v * 100:.0f}%"
-                w = fm.horizontalAdvance(txt) + 12
-                if x + w > self.width() - 6:
-                    break
-                p.setPen(self.FAMILY[fam])
-                p.drawText(QRectF(x, 2, w, TOP - 4),
-                           Qt.AlignmentFlag.AlignLeft
-                           | Qt.AlignmentFlag.AlignVCenter, txt)
-                x += w
 
         draw_markers(p, self.view, r, self.x_of, self.label_markers)
         self.draw_cursor_rule(p, r)
         self.draw_selection(p, r)
         p.end()
-
-    def contextMenuEvent(self, ev):
-        """Right-click picks the poll rate.
-
-        The bits are instantaneous flags on a controller that duty-cycles at
-        roughly 20 Hz, so 1 Hz reports a coin flip rather than a duty cycle,
-        and 1 Hz also switches the background thread off entirely. Higher
-        costs more CPU -- about 1.2% of a core at 20 Hz.
-        """
-        self._menu(ev.globalPos())
-
-    def on_click(self, x, y):
-        """Clicking the header opens the same menu. Chart panes already respond
-        to a click up there, so it is the one part of a pane a reader has
-        reason to try."""
-        if y <= TOP:
-            self._menu(self.mapToGlobal(QPoint(int(x), int(y))))
-
-    def _menu(self, at):
-        choice_menu(self, "Cap poll rate", CAP_RATES, self.cap_hz,
-                    self._set_cap_rate, at)
 
     def _set_cap_rate(self, hz):
         self.cap_hz = hz
@@ -238,71 +147,26 @@ class CorePane(TimePane):
         self.mode = i
         self.update()
 
-    def contextMenuEvent(self, ev):
-        """Right-click picks what the colour means.
-
-        This used to be a combo in the toolbar, which was pinned at the top of
-        the window while this pane sits most of a screen down -- the control
-        was nowhere near the thing it controlled, and the header here already
-        names the current mode and its unit.
-        """
-        self._menu(ev.globalPos())
-
-    def on_click(self, x, y):
-        if y <= TOP:
-            self._menu(self.mapToGlobal(QPoint(int(x), int(y))))
-
-    def _menu(self, at):
-        choice_menu(self, "Per-core metric",
-                    [(i, f"{name} ({unit})")
-                     for i, (_k, name, unit, _l, _h) in enumerate(HEAT_MODES)],
-                    self.mode, self.set_mode, at)
-
     def plot_rect(self):
-        return QRectF(render.LEFT, TOP,
-                      max(10, self.width() - render.LEFT - render.RIGHT),
+        left = self.gutter_left()
+        return QRectF(left, TOP,
+                      max(10, self.width() - left - render.RIGHT),
                       N_CORES * self.ROW)
 
     def paintEvent(self, _ev):
         p = QPainter(self)
         p.fillRect(self.rect(), PANE_BG)
-        base, name, unit, dlo, dhi = HEAT_MODES[self.mode]
+        base, _name, unit, dlo, dhi = HEAT_MODES[self.mode]
         r = self.plot_rect()
-        store = self.view.store
-        fm = QFontMetrics(self.font())
 
-        lo, hi = self._draw_image(p, r, store, base, dlo, dhi)
+        lo, hi = self._draw_image(p, r, self.view.store, base, dlo, dhi)
 
         p.setPen(MUTED)
         for c in range(N_CORES):
             y = r.top() + c * self.ROW
-            p.drawText(QRectF(0, y, render.LEFT - 8, self.ROW),
+            p.drawText(QRectF(0, y, self.gutter_left() - 8, self.ROW),
                        Qt.AlignmentFlag.AlignRight
                        | Qt.AlignmentFlag.AlignVCenter, f"core {c}")
-
-        # Header: title, then per-core readout at the crosshair.
-        f = QFont(self.font())
-        f.setBold(True)
-        p.setFont(f)
-        p.setPen(INK)
-        p.drawText(QRectF(6, 2, 300, TOP - 4),
-                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                   f"Per-core {name}  ({unit})")
-        p.setFont(self.font())
-
-        t = self.view.cursor
-        vals = []
-        for c in range(N_CORES):
-            v = (store.at(f"{base}_{c}", t) if t is not None
-                 else store.latest(f"{base}_{c}"))
-            vals.append(v)
-        txt = "  ".join(fmt_val(v, unit) for v in vals if v is not None)
-        if txt:
-            p.setPen(INK_DIM)
-            p.drawText(QRectF(self.width() - 8 - fm.horizontalAdvance(txt), 2,
-                              fm.horizontalAdvance(txt) + 2, TOP - 4),
-                       Qt.AlignmentFlag.AlignLeft
-                       | Qt.AlignmentFlag.AlignVCenter, txt)
 
         self._draw_colorbar(p, r, lo, hi, unit)
 
@@ -374,3 +238,121 @@ class CorePane(TimePane):
         p.drawText(QRectF(x + bw + 6, y - 2, 160, fm.height()),
                    Qt.AlignmentFlag.AlignLeft,
                    f"{fmt_val(lo, unit)} → {fmt_val(hi, unit)} {unit}")
+
+
+class ThrottleReadout(Readout):
+    """Which reasons are asserted, in words and as a percentage.
+
+    A lit cell in a raster is easy to miss and the whole point is not to miss
+    it. The percentage matters as much as the name: a reason asserted 8% of the
+    interval is a different situation from one asserted 95%, and both render as
+    a lit row.
+    """
+
+    def __init__(self, view, parent=None):
+        super().__init__(parent)
+        self.view = view
+        self.setMinimumWidth(160)
+
+    def entries(self):
+        store, t = self.view.store, self.view.cursor
+        out = []
+        for bit, name, fam in THROTTLE_BITS:
+            v = (store.at(f"thr{bit}", t) if t is not None
+                 else store.latest(f"thr{bit}"))
+            if v:
+                out.append((name, fam, v))
+        out.sort(key=lambda a: -a[2])
+        return out
+
+    def draw(self, p, r):
+        fm = QFontMetrics(self.font())
+        active = self.entries()
+        if not active:
+            p.setPen(MUTED)
+            p.drawText(r, Qt.AlignmentFlag.AlignRight
+                       | Qt.AlignmentFlag.AlignVCenter,
+                       "none — nothing is holding it back")
+            return
+        x = r.right()
+        for name, fam, v in active:
+            txt = f"◀ {name} {v * 100:.0f}%"
+            w = fm.horizontalAdvance(txt) + 12
+            if x - w < r.left():
+                break
+            x -= w
+            p.setPen(ThrottlePane.FAMILY[fam])
+            p.drawText(QRectF(x, r.top(), w, r.height()),
+                       Qt.AlignmentFlag.AlignLeft
+                       | Qt.AlignmentFlag.AlignVCenter, txt)
+
+
+class CoreReadout(Readout):
+    """The per-core values at the crosshair, in row order."""
+
+    def __init__(self, view, pane, parent=None):
+        super().__init__(parent)
+        self.view, self.pane = view, pane
+        self.setMinimumWidth(120)
+
+    def draw(self, p, r):
+        base, _name, unit, _lo, _hi = HEAT_MODES[self.pane.mode]
+        store, t = self.view.store, self.view.cursor
+        vals = [(store.at(f"{base}_{c}", t) if t is not None
+                 else store.latest(f"{base}_{c}")) for c in range(N_CORES)]
+        txt = "  ".join(fmt_val(v, unit) for v in vals if v is not None)
+        if txt:
+            p.setPen(INK_DIM)
+            p.drawText(r, Qt.AlignmentFlag.AlignRight
+                       | Qt.AlignmentFlag.AlignVCenter, txt)
+
+
+def _combo(items, current, apply):
+    box = QComboBox()
+    for label in items:
+        box.addItem(label)
+    box.setCurrentIndex(current)
+    box.currentIndexChanged.connect(apply)
+    box.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+    return box
+
+
+def throttle_frame(view, indent=0):
+    """The cap-reason strip, its poll-rate control, and its readout.
+
+    The rate is a visible combo rather than a hidden context menu because the
+    duty cycles beside it are meaningless without knowing what they were
+    measured over.
+    """
+    body = ThrottlePane(view)
+    rates = _combo([lbl for _hz, lbl in CAP_RATES], CAP_DEFAULT,
+                   lambda i: body._set_cap_rate(CAP_RATES[i][0]))
+    rates.setToolTip(
+        "How often the throttler bitmask is sampled. The bits toggle at "
+        "roughly 20 Hz, so 1 Hz reports a coin flip rather than a duty cycle, "
+        "and switches the background thread off. ~1.2% of a core at 20 Hz.")
+    frame = PaneFrame(body, "Cap reason", controls=[rates],
+                      readout=ThrottleReadout(view),
+                      height=render.HEADER_H + body.minimumHeight(),
+                      indent=indent)
+    frame.rates = rates
+    return frame
+
+
+def core_frame(view, indent=0):
+    """The per-core strip and the selector for what its colour means."""
+    body = CorePane(view)
+    readout = CoreReadout(view, body)
+
+    def pick(i):
+        body.set_mode(i)
+        readout.update()
+        frame.title.setText(f"Per-core {HEAT_MODES[i][1]}  ({HEAT_MODES[i][2]})")
+
+    modes = _combo([f"{n} ({u})" for _k, n, u, _l, _h in HEAT_MODES], 0, pick)
+    frame = PaneFrame(body, f"Per-core {HEAT_MODES[0][1]}  ({HEAT_MODES[0][2]})",
+                      controls=[modes], readout=readout,
+                      height=render.HEADER_H + body.minimumHeight(),
+                      indent=indent)
+    frame.modes = modes
+    return frame

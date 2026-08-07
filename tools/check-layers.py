@@ -35,7 +35,8 @@ LAYER = {
     "sampler": 2, "store": 2,
     "palette": 3, "panes": 3, "session": 3, "view": 3,
     "render": 4,
-    "timepane": 5, "chart": 5, "rasters": 5, "axis": 5, "section": 5,
+    "timepane": 5, "frame": 5, "chart": 5, "rasters": 5, "axis": 5,
+    "section": 5,
     "window": 6, "__main__": 6,
 }
 
@@ -48,6 +49,10 @@ ALLOWED_SAME_LAYER = {
     ("backends.amdgpu", "backends.base"),
     ("chart", "timepane"),
     ("rasters", "timepane"),
+    # frame supplies the widget chrome the painted bodies sit inside; like
+    # timepane it is base infrastructure for its layer, not a peer.
+    ("chart", "frame"),
+    ("rasters", "frame"),
     ("__main__", "window"),
 }
 

@@ -22,11 +22,11 @@ from PyQt6.QtWidgets import (QComboBox, QFileDialog, QInputDialog, QLabel,
 
 from . import render
 from .axis import TimeAxis
-from .chart import ChartPane
+from .chart import chart_frame
 from .fields import N_CORES, THROTTLE_BITS
 from .palette import INK, MUTED, SURFACE
 from .panes import GROUPS, HEAT_AFTER, PANES, THROTTLE_FIRST
-from .rasters import CorePane, ThrottlePane
+from .rasters import core_frame, throttle_frame
 from .render import fmt_time
 from .sampler import Sampler
 from .section import SectionHeader
@@ -95,11 +95,12 @@ class Main(QMainWindow):
         self.col = QVBoxLayout(inner)
         self.col.setContentsMargins(0, 0, 0, 0)
         self.col.setSpacing(2)
-        self.panes = []
+        self.panes = []          # PaneFrames; each wraps a painted body
         if THROTTLE_FIRST:
-            self.throttle = ThrottlePane(self.view)
+            frame = throttle_frame(self.view)
+            self.throttle = frame.body
             self.throttle.capRateChanged.connect(self.on_cap_rate)
-            self._add_pane(self.throttle)
+            self._add_pane(frame)
         # Groups are declared by the run of titles they wrap, so the column is
         # built by walking PANES in order and opening a section when its first
         # member comes up.
@@ -116,14 +117,15 @@ class Main(QMainWindow):
                 members = []
                 header.toggled.connect(
                     lambda on, m=members: self._set_section(m, on))
-            pane = ChartPane(spec, self.view)
-            self._add_pane(pane)
+            frame = chart_frame(spec, self.view)
+            self._add_pane(frame)
             if spec.title in grouped:
-                members.append(pane)
-                pane.setVisible(header.expanded)
+                members.append(frame)
+                frame.setVisible(header.expanded)
             if spec.title == HEAT_AFTER:
-                self.heat = CorePane(self.view)
-                self._add_pane(self.heat)
+                hf = core_frame(self.view)
+                self.heat = hf.body
+                self._add_pane(hf)
         if self.panes:
             self.panes[0].label_markers = True
         self.col.addStretch(1)
@@ -175,13 +177,13 @@ class Main(QMainWindow):
         for pane in members:
             pane.setVisible(on)
 
-    def _add_pane(self, pane):
+    def _add_pane(self, frame):
         """Every pane is wired the same way; the base class is what makes that
         true, so adding a kind of pane means writing no plumbing here."""
-        pane.cursorMoved.connect(self.on_cursor)
-        pane.rangeChanged.connect(self.on_range)
-        self.col.addWidget(pane)
-        self.panes.append(pane)
+        frame.body.cursorMoved.connect(self.on_cursor)
+        frame.body.rangeChanged.connect(self.on_range)
+        self.col.addWidget(frame)
+        self.panes.append(frame)
 
     def _build_toolbar(self):
         bar = QToolBar("controls")
@@ -319,7 +321,7 @@ class Main(QMainWindow):
         # column is off-screen at any time, and repainting it is pure waste.
         for p in self.panes:
             if not p.visibleRegion().isEmpty():
-                p.update()
+                p.update_live()
         self.axis.update()
         self.update_status()
 

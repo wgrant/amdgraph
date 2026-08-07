@@ -9,14 +9,15 @@ May import: palette, panes, render, timepane.
 import math
 
 import numpy as np
-from PyQt6.QtCore import QPointF, QRectF, Qt
+from PyQt6.QtCore import QPointF, QRectF, QSize, Qt
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 
+from . import render
+from .frame import PaneFrame, Readout
 from .palette import (AXIS, CRITICAL, GRID, INK, INK_DIM, MUTED, PANE_BG,
                       SERIES, WARNING, alpha)
-from . import render
-from .render import (BOTTOM, TOP, draw_markers, fmt_val, nice_range,
-                     polylines, time_ticks)
+from .render import (BOTTOM, HEADER_H, TOP, draw_markers, fmt_val,
+                     nice_range, polylines, time_ticks)
 from .timepane import TimePane
 
 
@@ -42,9 +43,10 @@ class ChartPane(TimePane):
         # per call, and y_of() calls it once per plotted point -- it was the
         # single largest cost in a repaint.
         if self._rect is None:
+            left = self.gutter_left()
             self._rect = QRectF(
-                render.LEFT, TOP,
-                max(10, self.width() - render.LEFT - render.RIGHT),
+                left, TOP,
+                max(10, self.width() - left - render.RIGHT),
                 max(10, self.height() - TOP - BOTTOM))
         return self._rect
 
@@ -108,7 +110,6 @@ class ChartPane(TimePane):
             self._draw_store(p, r, self.view.store, ghost=False)
             self._draw_end_labels(p, r)
         draw_markers(p, self.view, r, self.x_of, self.label_markers)
-        self._draw_header(p)
         self._draw_cursor(p, r)
         self.draw_selection(p, r)
         p.end()
@@ -129,7 +130,7 @@ class ChartPane(TimePane):
             p.drawLine(QPointF(r.left(), y), QPointF(r.right(), y))
             p.setPen(MUTED)
             txt = fmt_val(v, self.spec.unit)
-            p.drawText(QRectF(0, y - fm.height() / 2, render.LEFT - 8,
+            p.drawText(QRectF(0, y - fm.height() / 2, self.gutter_left() - 8,
                               fm.height()),
                        Qt.AlignmentFlag.AlignRight
                        | Qt.AlignmentFlag.AlignVCenter, txt)
@@ -220,71 +221,6 @@ class ChartPane(TimePane):
                        Qt.AlignmentFlag.AlignLeft
                        | Qt.AlignmentFlag.AlignVCenter, label)
 
-    def _draw_header(self, p):
-        """Title on the left, then the legend: a colour chip, the series name,
-        and its value at the crosshair (or the latest value when there is no
-        crosshair). Reading values off the legend rather than off the axis is
-        what makes the shared crosshair useful."""
-        fm = QFontMetrics(self.font())
-        store = self.view.store
-        t = self.view.cursor
-
-        p.setPen(INK)
-        f = QFont(self.font())
-        f.setBold(True)
-        p.setFont(f)
-        title = self.spec.title
-        if self.spec.unit:
-            title += f"  ({self.spec.unit})"
-        p.drawText(QRectF(6, 2, 260, TOP - 4),
-                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-                   title)
-        tw = fm.horizontalAdvance(title) + 18
-        p.setFont(self.font())
-
-        # Measure the legend before drawing the note, so the note gets the room
-        # that is actually left. It used to be drawn into a fixed 320 px box and
-        # was simply cut off mid-word on a narrow window or a large font.
-        entries = self._legend_entries(fm, store, t)
-        legend_w = sum(w for _i, _s, _txt, w, _flag in entries)
-
-        if self.spec.note:
-            p.setPen(MUTED)
-            avail = self.width() - 8 - legend_w - (6 + tw) - 12
-            if avail > 24:
-                p.drawText(QRectF(6 + tw, 2, avail, TOP - 4),
-                           Qt.AlignmentFlag.AlignLeft
-                           | Qt.AlignmentFlag.AlignVCenter,
-                           fm.elidedText(self.spec.note,
-                                         Qt.TextElideMode.ElideRight,
-                                         int(avail)))
-
-        # Legend, right-aligned, built right-to-left.
-        x = self.width() - 8
-        for i, s, txt, w, flag in reversed(entries):
-            if x - w < 6:
-                break
-            x -= w
-            col = QColor(SERIES[i % len(SERIES)])
-            if not s.visible:
-                col = alpha(col, 70)
-            p.setBrush(col)
-            p.setPen(Qt.PenStyle.NoPen)
-            p.drawEllipse(QRectF(x, TOP / 2 - 3.5, 7, 7))
-            p.setPen(INK_DIM if s.visible else MUTED)
-            p.drawText(QRectF(x + 11, 2, w - 11, TOP - 4),
-                       Qt.AlignmentFlag.AlignLeft
-                       | Qt.AlignmentFlag.AlignVCenter, txt)
-            if flag:
-                p.setPen(flag[1])
-                fw = fm.horizontalAdvance(txt)
-                p.drawText(QRectF(x + 11 + fw - fm.horizontalAdvance(flag[0]),
-                                  2, fm.horizontalAdvance(flag[0]) + 2,
-                                  TOP - 4),
-                           Qt.AlignmentFlag.AlignLeft
-                           | Qt.AlignmentFlag.AlignVCenter, flag[0])
-            self.spec.series[i].hit = (x, x + w)
-
     def _legend_entries(self, fm, store, t):
         """(index, series, text, width, flag) for each series, in pane order.
 
@@ -374,15 +310,109 @@ class ChartPane(TimePane):
             return
         super().mouseReleaseEvent(ev)
 
-    def on_click(self, x, y):
-        """Clicking a legend entry hides or shows that series. Colour is bound
-        to the slot, not to the rank, so hiding one does not repaint the
-        others."""
-        if y > TOP:
-            return
+
+class ChartLegend(Readout):
+    """The right-hand end of a chart pane's header: a colour chip, the series
+    name, and its value at the crosshair -- or the latest value when there is
+    no crosshair. Reading values off the legend rather than off the axis is
+    what makes the shared crosshair useful.
+
+    Painted rather than laid out because it rewrites on every tick and every
+    crosshair move; clicking an entry still hides that series.
+    """
+
+    def __init__(self, spec, view, on_change=lambda: None, parent=None):
+        super().__init__(parent)
+        self.spec, self.view = spec, view
+        self.on_change = on_change
+        self.setMinimumWidth(120)
+
+    def entries(self, fm):
+        """(index, series, text, width, flag) in pane order."""
+        store, t = self.view.store, self.view.cursor
+        out = []
+        for i, s in enumerate(self.spec.series):
+            # Value and limit are read at the same instant. Reading the value
+            # at the crosshair but the limit at "now" compared two different
+            # moments, which mattered as soon as the limits started moving.
+            if t is not None:
+                v = store.at(s.key, t)
+                lim = store.at(s.limit, t) if s.limit else None
+            else:
+                v = store.latest(s.key)
+                lim = store.latest(s.limit) if s.limit else None
+            txt = f"{s.label} {fmt_val(v, self.spec.unit)}"
+            if lim is not None and math.isfinite(lim) and lim > 0:
+                txt += f"/{fmt_val(lim, self.spec.unit)}"
+            flag = ChartPane._limit_flag(s, v, lim)
+            if flag:
+                txt += f"  {flag[0]}"
+            out.append((i, s, txt, fm.horizontalAdvance(txt) + 20, flag))
+        return out
+
+    def sizeHint(self):
+        """Sized for the widest text an entry can hold, not for the values
+        showing right now -- a hint that moved with the data would relayout
+        the header on every tick, and would also let a legend that fitted at
+        startup stop fitting later."""
+        fm = QFontMetrics(self.font())
+        w = 0
+        for s in self.spec.series:
+            txt = f"{s.label} 000.0"
+            if s.limit:
+                txt += "/000.0"
+            if s.limit and not s.good_high:
+                txt += "  ◀ CAPPED"
+            w += fm.horizontalAdvance(txt) + 20
+        return QSize(w, HEADER_H)
+
+    def paintEvent(self, _ev):
+        p = QPainter(self)
+        fm = QFontMetrics(self.font())
+        h = self.height()
+        x = self.width()
+        for i, s, txt, w, flag in reversed(self.entries(fm)):
+            if x - w < 0:
+                s.hit = None
+                continue
+            x -= w
+            col = QColor(SERIES[i % len(SERIES)])
+            if not s.visible:
+                col = alpha(col, 70)
+            p.setBrush(col)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawEllipse(QRectF(x, h / 2 - 3.5, 7, 7))
+            p.setPen(INK_DIM if s.visible else MUTED)
+            p.drawText(QRectF(x + 11, 0, w - 11, h),
+                       Qt.AlignmentFlag.AlignLeft
+                       | Qt.AlignmentFlag.AlignVCenter, txt)
+            if flag:
+                p.setPen(flag[1])
+                fw = fm.horizontalAdvance(txt)
+                p.drawText(QRectF(x + 11 + fw - fm.horizontalAdvance(flag[0]),
+                                  0, fm.horizontalAdvance(flag[0]) + 2, h),
+                           Qt.AlignmentFlag.AlignLeft
+                           | Qt.AlignmentFlag.AlignVCenter, flag[0])
+            s.hit = (x, x + w)
+        p.end()
+
+    def mousePressEvent(self, ev):
+        """Clicking an entry hides or shows that series. Colour is bound to the
+        slot, not to the rank, so hiding one does not repaint the others."""
+        x = ev.position().x()
         for s in self.spec.series:
             hit = getattr(s, "hit", None)
             if hit and hit[0] <= x <= hit[1]:
                 s.visible = not s.visible
                 self.update()
+                self.on_change()
                 return
+
+
+def chart_frame(spec, view, indent=0):
+    """A chart pane and the header that describes it."""
+    body = ChartPane(spec, view)
+    title = f"{spec.title}  ({spec.unit})" if spec.unit else spec.title
+    legend = ChartLegend(spec, view, on_change=body.update)
+    return PaneFrame(body, title, note=spec.note, readout=legend,
+                     height=spec.height, indent=indent)

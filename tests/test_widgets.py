@@ -19,12 +19,15 @@ from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt          # noqa: E402
 from PyQt6.QtGui import (QFont, QFontMetrics, QImage,         # noqa: E402
                          QMouseEvent, QWheelEvent)
 
+from PyQt6.QtWidgets import QComboBox                         # noqa: E402
+
 from amdgraph import render                                   # noqa: E402
-from amdgraph.chart import ChartPane                          # noqa: E402
+from amdgraph.chart import ChartPane, chart_frame             # noqa: E402
 from amdgraph.fields import N_CORES, THROTTLE_BITS            # noqa: E402
-from amdgraph.panes import (CAP_RATES, HEAT_MODES,             # noqa: E402
-                            PANES)
-from amdgraph.rasters import CorePane, ThrottlePane           # noqa: E402
+from amdgraph.panes import (CAP_DEFAULT, CAP_RATES,            # noqa: E402
+                            HEAT_MODES, PANES)
+from amdgraph.rasters import (CorePane, ThrottlePane,          # noqa: E402
+                              core_frame, throttle_frame)
 from amdgraph.render import TOP                               # noqa: E402
 from amdgraph.store import Store                              # noqa: E402
 from amdgraph.view import View                                # noqa: E402
@@ -172,90 +175,107 @@ class TestRendering:
         render_pane(ChartPane(PANES[0], view), PANES[0].height)
 
     @pytest.mark.parametrize("spec", PANES, ids=lambda s: s.title)
-    def test_height_is_fixed_so_the_column_lines_up(self, view, spec):
-        p = ChartPane(spec, view)
-        assert p.minimumHeight() == spec.height == p.maximumHeight()
+    def test_the_frame_owns_the_row_height(self, view, spec):
+        """spec.height is the whole row -- header plus body -- so the fold
+        arithmetic and the concertina measurements stay valid now that the
+        header is a separate widget."""
+        f = chart_frame(spec, view)
+        assert f.minimumHeight() == spec.height == f.maximumHeight()
+        assert f.body.height() == spec.height - render.HEADER_H
+
+
+class TestHeaderLayout:
+    """The header is a layout now, so the panes compete for its width. The
+    first version let the note win, which silently dropped legend entries off
+    the end -- a whole series vanishing with nothing to say it had."""
+
+    @pytest.mark.parametrize("spec", PANES, ids=lambda s: s.title)
+    def test_no_legend_entry_is_dropped(self, view, spec):
+        for s in spec.series:
+            s.visible = True
+            s.hit = None
+        frame = chart_frame(spec, view)
+        frame.resize(1180, spec.height)
+        frame.show()
+        frame.readout.render(
+            QImage(frame.readout.size(), QImage.Format.Format_ARGB32))
+        missing = [s.label for s in spec.series if s.hit is None]
+        assert not missing, f"dropped {missing} from {spec.title}"
+
+    @pytest.mark.parametrize("spec", PANES, ids=lambda s: s.title)
+    def test_the_legend_hint_does_not_move_with_the_data(self, view, spec):
+        """A hint that tracked the current values would relayout the header on
+        every tick, and would let a legend that fitted at startup stop fitting
+        once a number grew a digit."""
+        frame = chart_frame(spec, view)
+        before = frame.readout.sizeHint().width()
+        for i in range(30):
+            view.store.append(1000.0 + i, {s.key: 987.654 for s in spec.series})
+        assert frame.readout.sizeHint().width() == before
+
+    def test_the_note_yields_before_the_legend_does(self, view):
+        """Something has to give on a narrow window. The note is the least
+        important thing in the row, so it must be spent down to nothing before
+        the legend loses a single pixel -- the legend is live data."""
+        spec = next(s for s in PANES if s.note)
+        frame = chart_frame(spec, view)
+        frame.show()
+        want = frame.readout.sizeHint().width()
+        natural = QFontMetrics(frame.note.font()).horizontalAdvance(spec.note)
+
+        # Wide: both fit.
+        frame.resize(1400, spec.height)
+        assert frame.readout.width() >= want
+        assert frame.note.width() >= natural
+
+        # Narrow until the legend is first squeezed, and check the note is
+        # already spent by then.
+        for w in range(1400, 200, -20):
+            frame.resize(w, spec.height)
+            if frame.readout.width() < want:
+                assert frame.note.width() <= 8, (
+                    f"note still {frame.note.width()} px wide while the "
+                    f"legend is being cut at window width {w}")
+                return
+        pytest.fail("the legend was never squeezed; test proves nothing")
 
 
 class TestPaneOwnedSettings:
-    """Both raster panes carry a setting that governs only themselves. Neither
-    has a toolbar widget any more, so the header shows the state and a menu on
-    the pane changes it -- which makes these the only route to either."""
+    """Both raster panes carry a setting that governs only themselves. Each is
+    now a visible combo in that pane's own header rather than a context menu
+    nobody would find, which was the point of giving panes real chrome."""
 
-    @staticmethod
-    def open_menu(monkeypatch, widget, method):
-        """Capture the menu instead of running a modal exec()."""
-        from PyQt6.QtWidgets import QMenu
-        seen = {}
+    def test_the_cap_rate_is_a_visible_control(self, view):
+        frame = throttle_frame(view)
+        assert frame.rates.count() == len(CAP_RATES)
+        assert frame.rates.currentText() == CAP_RATES[CAP_DEFAULT][1]
 
-        def fake_exec(self, *a, **k):
-            seen["actions"] = [(a.text(), a.isChecked(), a.isEnabled())
-                               for a in self.actions()]
-            seen["menu"] = self
-            return None
+    def test_choosing_a_rate_reaches_the_body(self, view):
+        frame = throttle_frame(view)
+        seen = []
+        frame.body.capRateChanged.connect(seen.append)
+        frame.rates.setCurrentIndex(0)
+        assert frame.body.cap_hz == CAP_RATES[0][0]
+        assert seen == [CAP_RATES[0][0]]
 
-        monkeypatch.setattr(QMenu, "exec", fake_exec)
-        method()
-        return seen
+    def test_the_core_metric_is_a_visible_control(self, view):
+        frame = core_frame(view)
+        assert [frame.modes.itemText(i) for i in range(frame.modes.count())] \
+            == [f"{n} ({u})" for _k, n, u, _l, _h in HEAT_MODES]
 
-    def test_core_menu_lists_every_mode_and_ticks_the_current_one(
-            self, view, monkeypatch):
-        c = CorePane(view)
-        c.set_mode(2)
-        seen = self.open_menu(monkeypatch, c, lambda: c._menu(QPoint(0, 0)))
-        labels = [t for t, _chk, en in seen["actions"] if en and t]
-        assert labels == [f"{n} ({u})" for _k, n, u, _l, _h in HEAT_MODES]
-        checked = [t for t, chk, en in seen["actions"] if chk]
-        name, unit = HEAT_MODES[2][1], HEAT_MODES[2][2]
-        assert checked == [f"{name} ({unit})"]
+    def test_choosing_a_metric_changes_the_body_and_the_title(self, view):
+        frame = core_frame(view)
+        frame.modes.setCurrentIndex(3)
+        assert frame.body.mode == 3
+        name, unit = HEAT_MODES[3][1], HEAT_MODES[3][2]
+        assert frame.title.text() == f"Per-core {name}  ({unit})"
 
-    def test_choosing_a_mode_changes_the_pane(self, view, monkeypatch):
-        c = CorePane(view)
-        seen = self.open_menu(monkeypatch, c, lambda: c._menu(QPoint(0, 0)))
-        target = [a for a in seen["menu"].actions()
-                  if a.text() == f"{HEAT_MODES[3][1]} ({HEAT_MODES[3][2]})"]
-        target[0].trigger()
-        assert c.mode == 3
-
-    def test_throttle_menu_ticks_the_current_rate(self, view, monkeypatch):
-        t = ThrottlePane(view)
-        t.cap_hz = CAP_RATES[1][0]
-        seen = self.open_menu(monkeypatch, t, lambda: t._menu(QPoint(0, 0)))
-        assert [lbl for lbl, chk, _en in seen["actions"]
-                if chk] == [CAP_RATES[1][1]]
-
-    @pytest.mark.parametrize("kind", ["throttle", "core"])
-    def test_a_header_click_opens_the_menu(self, kind, view, monkeypatch):
-        w = make(kind, view)
-        opened = []
-        monkeypatch.setattr(type(w), "_menu",
-                            lambda self, at: opened.append(at))
-        press(w, 300, y=6)
-        release(w, 300, y=6)
-        assert opened, "clicking the header should offer the setting"
-
-    @pytest.mark.parametrize("kind", ["throttle", "core"])
-    def test_a_click_in_the_plot_area_does_not(self, kind, view, monkeypatch):
-        w = make(kind, view)
-        opened = []
-        monkeypatch.setattr(type(w), "_menu",
-                            lambda self, at: opened.append(at))
-        press(w, 300, y=TOP + 30)
-        release(w, 300, y=TOP + 30)
-        assert not opened
-
-    @pytest.mark.parametrize("kind", ["throttle", "core"])
-    def test_dragging_from_the_header_still_zooms(self, kind, view,
-                                                  monkeypatch):
-        """The header is a click target, not a dead zone."""
-        w = make(kind, view)
-        monkeypatch.setattr(type(w), "_menu", lambda self, at: None)
-        t_a, t_b = w.t_of(300), w.t_of(800)
-        press(w, 300, y=6)
-        move(w, 800, y=6)
-        release(w, 800, y=6)
-        assert view.t0 == pytest.approx(t_a)
-        assert view.t1 == pytest.approx(t_b)
+    def test_the_controls_do_not_take_focus(self, view):
+        """A focused combo eats Space and the arrow keys; Space is the only
+        way to freeze."""
+        for frame in (throttle_frame(view), core_frame(view)):
+            for c in frame.header.findChildren(QComboBox):
+                assert c.focusPolicy() == Qt.FocusPolicy.NoFocus
 
 
 class TestInteraction:
@@ -299,7 +319,7 @@ class TestInteraction:
         r = w.plot_rect()
         before = (view.t0, view.t1)
         for x, y, where in ((r.left() / 2, r.center().y(), "axis gutter"),
-                            (r.center().x(), 4, "header"),
+                            (r.center().x(), r.bottom() + 4, "below the plot"),
                             (r.right() + 20, r.center().y(), "end labels")):
             ev = wheel(w, x, 120, y=y)
             assert not ev.isAccepted(), f"wheel over the {where} was eaten"
@@ -365,44 +385,53 @@ class TestInteraction:
 
 
 class TestLegend:
+    """The legend is a painted readout inside a real header widget: painted
+    because it rewrites on every tick and every crosshair move, but still the
+    thing you click to hide a series."""
+
     @pytest.fixture
-    def pane(self, view):
+    def legend(self, view):
         spec = PANES[0]
         for s in spec.series:
             s.visible = True
-        cp = ChartPane(spec, view)
-        cp.resize(W, spec.height)
-        render_pane(cp, spec.height)          # populates the legend hit boxes
-        yield cp, spec
+        frame = chart_frame(spec, view)
+        frame.resize(W, spec.height)
+        # Lay the frame out for real, then paint, so the hit boxes match the
+        # width the readout actually got.
+        frame.show()
+        frame.readout.render(
+            QImage(frame.readout.size(), QImage.Format.Format_ARGB32))
+        yield frame, spec
         for s in spec.series:
             s.visible = True             # PANES is module state; put it back
 
-    def test_legend_click_toggles_only_that_series(self, pane):
-        cp, spec = pane
+    def test_click_toggles_only_that_series(self, legend):
+        frame, spec = legend
         hit = spec.series[0].hit
         assert hit is not None
         x = (hit[0] + hit[1]) / 2
-        press(cp, x, y=8)
-        release(cp, x, y=8)
+        press(frame.readout, x, y=10)
         assert [s.visible for s in spec.series] == \
             [False] + [True] * (len(spec.series) - 1)
-        press(cp, x, y=8)
-        release(cp, x, y=8)
+        press(frame.readout, x, y=10)
         assert all(s.visible for s in spec.series)
 
-    def test_a_click_in_the_plot_area_toggles_nothing(self, pane):
-        cp, spec = pane
-        x = sum(spec.series[0].hit) / 2
-        press(cp, x, y=TOP + 20)
-        release(cp, x, y=TOP + 20)
+    def test_a_click_off_any_entry_toggles_nothing(self, legend):
+        frame, spec = legend
+        hits = [s.hit for s in spec.series if s.hit]
+        gap = min(h[0] for h in hits) - 2      # left of every entry drawn
+        if gap < 0:
+            pytest.skip("legend fills its width; no empty space to click")
+        press(frame.readout, gap, y=10)
         assert all(s.visible for s in spec.series)
 
-    def test_hidden_series_keeps_its_colour_slot(self, pane):
+    def test_hidden_series_keeps_its_colour_slot(self, legend):
         """Colour is bound to position, not rank, so hiding one series must not
         repaint the others."""
-        cp, spec = pane
-        assert [i for i, _ in cp._visible_series()] == \
+        frame, spec = legend
+        body = frame.body
+        assert [i for i, _ in body._visible_series()] == \
             list(range(len(spec.series)))
         spec.series[0].visible = False
-        assert [i for i, _ in cp._visible_series()] == \
-            list(range(1, len(spec.series)))       # not renumbered
+        assert [i for i, _ in body._visible_series()] == \
+            list(range(1, len(spec.series)))      # not renumbered
