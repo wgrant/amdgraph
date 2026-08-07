@@ -2,10 +2,10 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Mapping, Optional, Protocol, Sequence, Tuple
+from typing import Dict, Mapping, Optional, Protocol, Sequence, Tuple, Union
 
 
-SampleValue = Optional[float]
+SampleValue = Optional[Union[float, str]]
 Sample = Dict[str, SampleValue]
 Metadata = Dict[str, str]
 
