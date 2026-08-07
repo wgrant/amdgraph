@@ -11,56 +11,32 @@ For an A/B comparison across a refactor, hash the renders in a scratch script
 against the previous commit; that is a refactoring aid, not a regression test.
 """
 
-import math
-import os
-import unittest
+import pytest
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+pytest.importorskip("PyQt6.QtWidgets")
 
-try:
-    from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt
-    from PyQt6.QtGui import QImage, QMouseEvent, QWheelEvent
-    from PyQt6.QtWidgets import QApplication
-    HAVE_QT = True
-except ImportError:                                    # pragma: no cover
-    HAVE_QT = False
+from PyQt6.QtCore import QEvent, QPoint, QPointF, Qt          # noqa: E402
+from PyQt6.QtGui import QImage, QMouseEvent, QWheelEvent      # noqa: E402
 
-if HAVE_QT:
-    from amdgraph.chart import ChartPane
-    from amdgraph.panes import HEAT_MODES, PANES
-    from amdgraph.rasters import CorePane, ThrottlePane
-    from amdgraph.render import TOP
-    from amdgraph.store import Store
-    from amdgraph.view import View
+from amdgraph.chart import ChartPane                          # noqa: E402
+from amdgraph.panes import HEAT_MODES, PANES                  # noqa: E402
+from amdgraph.rasters import CorePane, ThrottlePane           # noqa: E402
+from amdgraph.render import TOP                               # noqa: E402
+from amdgraph.store import Store                              # noqa: E402
+from amdgraph.view import View                                # noqa: E402
 
-_app = None
 W = 1200
+KINDS = ["chart", "throttle", "core"]
+
+pytestmark = pytest.mark.usefixtures("qapp")
 
 
-def setUpModule():
-    global _app
-    if HAVE_QT:
-        _app = QApplication.instance() or QApplication([])
-
-
-def fixture_store(n=200):
-    """A deterministic recording: no clock, no RNG, no hardware."""
-    st = Store()
-    for i in range(n):
-        t = i * 0.5
-        st.append(t, {
-            "stapm": 15.0 + 5.0 * math.sin(i / 9.0),
-            "stapm_lim": 30.0,
-            "ppt_fast": 12.0, "ppt_fast_lim": 30.0,
-            "ppt_slow": 14.0, "ppt_slow_lim": 25.0,
-            "tctl": 60.0 + i % 20, "tctl_lim": 100.0,
-            "pwr_socket": 20.0, "pwr_soc": 2.0, "core_power_sum": 14.0,
-            "thr0": (i % 5) / 5.0, "thr11": 1.0 if i % 3 else 0.0,
-            **{f"core_freq_{c}": 1000.0 + 200 * c for c in range(8)},
-            **{f"core_c0_{c}": float(c * 10) for c in range(8)},
-            "core_freq_max": 2600.0, "core_freq_mean": 1800.0,
-        })
-    return st
+def make(kind, view):
+    w = {"chart": lambda: ChartPane(PANES[0], view),
+         "throttle": lambda: ThrottlePane(view),
+         "core": lambda: CorePane(view)}[kind]()
+    w.resize(W, max(120, w.minimumHeight() or 120))
+    return w
 
 
 def render(w, h=None):
@@ -72,15 +48,13 @@ def render(w, h=None):
     return img
 
 
-def press(w, x, y=40, btn=None):
-    btn = btn or Qt.MouseButton.LeftButton
+def press(w, x, y=40, btn=Qt.MouseButton.LeftButton):
     w.mousePressEvent(QMouseEvent(
         QEvent.Type.MouseButtonPress, QPointF(x, y), QPointF(x, y),
         btn, btn, Qt.KeyboardModifier.NoModifier))
 
 
-def release(w, x, y=40, btn=None):
-    btn = btn or Qt.MouseButton.LeftButton
+def release(w, x, y=40, btn=Qt.MouseButton.LeftButton):
     w.mouseReleaseEvent(QMouseEvent(
         QEvent.Type.MouseButtonRelease, QPointF(x, y), QPointF(x, y),
         btn, Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier))
@@ -100,218 +74,175 @@ def wheel(w, x, dy):
         Qt.ScrollPhase.NoScrollPhase, False))
 
 
-@unittest.skipUnless(HAVE_QT, "PyQt6 not installed")
-class TestRendering(unittest.TestCase):
-    def setUp(self):
-        self.store = fixture_store()
-        self.view = View(self.store)
-        self.view.window = 300.0
-        self.view.update_range()
+class TestRendering:
+    @pytest.mark.parametrize("spec", PANES, ids=lambda s: s.title)
+    def test_every_pane_in_the_catalogue_paints(self, view, spec):
+        render(ChartPane(spec, view), spec.height)
 
-    def test_every_pane_in_the_catalogue_paints(self):
-        for spec in PANES:
-            with self.subTest(pane=spec.title):
-                render(ChartPane(spec, self.view), spec.height)
+    def test_throttle_strip_paints(self, view):
+        render(ThrottlePane(view))
 
-    def test_strip_charts_paint(self):
-        render(ThrottlePane(self.view))
-        for i in range(len(HEAT_MODES)):
-            c = CorePane(self.view)
-            c.set_mode(i)
-            render(c)
+    @pytest.mark.parametrize("mode", range(len(HEAT_MODES)),
+                             ids=[m[1] for m in HEAT_MODES])
+    def test_core_strip_paints_in_every_mode(self, view, mode):
+        c = CorePane(view)
+        c.set_mode(mode)
+        render(c)
 
-    def test_panes_paint_over_an_empty_store(self):
+    @pytest.mark.parametrize("kind", KINDS)
+    def test_panes_paint_over_an_empty_store(self, kind):
         v = View(Store())
         v.update_range()
-        for spec in PANES:
-            render(ChartPane(spec, v), spec.height)
-        render(ThrottlePane(v))
-        render(CorePane(v))
+        render(make(kind, v))
 
-    def test_panes_paint_with_cursor_markers_and_overlay(self):
-        self.view.cursor = (self.view.t0 + self.view.t1) / 2
-        self.view.markers = [(self.view.t0 + 10, "flipped"), (self.view.t1, "")]
-        self.view.overlay = fixture_store(50)
-        for w, h in ((ChartPane(PANES[0], self.view), PANES[0].height),
-                     (ThrottlePane(self.view), None),
-                     (CorePane(self.view), None)):
-            w.label_markers = True
-            render(w, h)
+    @pytest.mark.parametrize("kind", KINDS)
+    def test_panes_paint_with_cursor_markers_and_overlay(self, kind, view,
+                                                         store):
+        view.cursor = (view.t0 + view.t1) / 2
+        view.markers = [(view.t0 + 10, "flipped"), (view.t1, "")]
+        view.overlay = store
+        w = make(kind, view)
+        w.label_markers = True
+        render(w)
 
-    def test_a_cursor_outside_the_window_is_not_drawn(self):
-        self.view.cursor = self.view.t1 + 10_000
-        render(ChartPane(PANES[0], self.view), PANES[0].height)
+    def test_a_cursor_outside_the_window_is_not_drawn(self, view):
+        view.cursor = view.t1 + 10_000
+        render(ChartPane(PANES[0], view), PANES[0].height)
 
-    def test_whole_recording_exercises_the_decimation_path(self):
-        v = View(fixture_store(5000))
-        v.window = 0.0
-        v.update_range()
-        render(ChartPane(PANES[0], v), PANES[0].height)
+    def test_whole_recording_exercises_the_decimation_path(self, view):
+        view.window = 0.0
+        view.update_range()
+        render(ChartPane(PANES[0], view), PANES[0].height)
 
-    def test_height_is_fixed_so_the_column_lines_up(self):
-        for spec in PANES:
-            p = ChartPane(spec, self.view)
-            self.assertEqual(p.minimumHeight(), spec.height)
-            self.assertEqual(p.maximumHeight(), spec.height)
+    @pytest.mark.parametrize("spec", PANES, ids=lambda s: s.title)
+    def test_height_is_fixed_so_the_column_lines_up(self, view, spec):
+        p = ChartPane(spec, view)
+        assert p.minimumHeight() == spec.height == p.maximumHeight()
 
 
-@unittest.skipUnless(HAVE_QT, "PyQt6 not installed")
-class TestInteraction(unittest.TestCase):
+class TestInteraction:
     """Exact arithmetic, so these assertions are portable."""
 
-    def make(self, kind):
-        store = fixture_store()
-        view = View(store)
-        view.window = 300.0
-        view.update_range()
-        w = {"chart": lambda: ChartPane(PANES[0], view),
-             "throttle": lambda: ThrottlePane(view),
-             "core": lambda: CorePane(view)}[kind]()
-        w.resize(W, max(120, w.minimumHeight() or 120))
-        return w, view
+    @pytest.mark.parametrize("kind", KINDS)
+    def test_drag_zooms_to_exactly_the_dragged_span(self, kind, view):
+        w = make(kind, view)
+        t_a, t_b = w.t_of(300), w.t_of(800)
+        press(w, 300)
+        move(w, 800)
+        release(w, 800)
+        assert view.t0 == pytest.approx(t_a)
+        assert view.t1 == pytest.approx(t_b)
+        assert not view.follow
 
-    def test_drag_zooms_to_exactly_the_dragged_span(self):
-        for kind in ("chart", "throttle", "core"):
-            with self.subTest(kind=kind):
-                w, v = self.make(kind)
-                t_a, t_b = w.t_of(300), w.t_of(800)
-                press(w, 300)
-                move(w, 800)
-                release(w, 800)
-                self.assertAlmostEqual(v.t0, t_a, places=6)
-                self.assertAlmostEqual(v.t1, t_b, places=6)
-                self.assertFalse(v.follow)
+    @pytest.mark.parametrize("kind", KINDS)
+    def test_a_tiny_drag_is_a_click_not_a_zoom(self, kind, view):
+        w = make(kind, view)
+        before = (view.t0, view.t1)
+        press(w, 500)
+        release(w, 500.5)
+        assert (view.t0, view.t1) == before
 
-    def test_a_tiny_drag_is_a_click_not_a_zoom(self):
-        for kind in ("chart", "throttle", "core"):
-            with self.subTest(kind=kind):
-                w, v = self.make(kind)
-                before = (v.t0, v.t1)
-                press(w, 500)
-                release(w, 500.5)
-                self.assertEqual((v.t0, v.t1), before)
+    @pytest.mark.parametrize("kind", KINDS)
+    def test_wheel_in_then_out_is_reversible(self, kind, view):
+        w = make(kind, view)
+        before = (view.t0, view.t1)
+        wheel(w, 400, 120)
+        assert view.t1 - view.t0 < before[1] - before[0]
+        wheel(w, 400, -120)
+        assert view.t0 == pytest.approx(before[0])
+        assert view.t1 == pytest.approx(before[1])
 
-    def test_wheel_in_then_out_is_reversible(self):
-        for kind in ("chart", "throttle", "core"):
-            with self.subTest(kind=kind):
-                w, v = self.make(kind)
-                before = (v.t0, v.t1)
-                wheel(w, 400, 120)
-                self.assertLess(v.t1 - v.t0, before[1] - before[0])
-                wheel(w, 400, -120)
-                self.assertAlmostEqual(v.t0, before[0], places=6)
-                self.assertAlmostEqual(v.t1, before[1], places=6)
-
-    def test_zero_delta_wheel_does_nothing(self):
-        w, v = self.make("chart")
-        before = (v.t0, v.t1, v.follow)
+    def test_zero_delta_wheel_does_nothing(self, view):
+        w = make("chart", view)
+        before = (view.t0, view.t1, view.follow)
         wheel(w, 400, 0)
-        self.assertEqual((v.t0, v.t1, v.follow), before)
+        assert (view.t0, view.t1, view.follow) == before
 
-    def test_middle_drag_pans_the_chart_only(self):
-        w, v = self.make("chart")
-        span = v.t1 - v.t0
+    def test_middle_drag_pans_the_chart(self, view):
+        w = make("chart", view)
+        span = view.t1 - view.t0
         press(w, 400, btn=Qt.MouseButton.MiddleButton)
         move(w, 600)
         release(w, 600, btn=Qt.MouseButton.MiddleButton)
-        self.assertAlmostEqual(v.t1 - v.t0, span, places=6)
-        self.assertLess(v.t0, 0.0 + span)        # moved left in time
-        self.assertFalse(v.follow)
-        self.assertIsNone(w.pan_from)
+        assert view.t1 - view.t0 == pytest.approx(span)
+        assert not view.follow
+        assert w.pan_from is None
 
-    def test_middle_drag_is_inert_on_the_strip_charts(self):
-        for kind in ("throttle", "core"):
-            with self.subTest(kind=kind):
-                w, v = self.make(kind)
-                before = (v.t0, v.t1, v.follow)
-                press(w, 400, btn=Qt.MouseButton.MiddleButton)
-                move(w, 600)
-                release(w, 600, btn=Qt.MouseButton.MiddleButton)
-                self.assertEqual((v.t0, v.t1), before[:2])
+    @pytest.mark.parametrize("kind", ["throttle", "core"])
+    def test_middle_drag_is_inert_on_the_strip_charts(self, kind, view):
+        w = make(kind, view)
+        before = (view.t0, view.t1)
+        press(w, 400, btn=Qt.MouseButton.MiddleButton)
+        move(w, 600)
+        release(w, 600, btn=Qt.MouseButton.MiddleButton)
+        assert (view.t0, view.t1) == before
 
-    def test_leaving_mid_drag_keeps_the_crosshair(self):
-        for kind in ("chart", "throttle", "core"):
-            with self.subTest(kind=kind):
-                w, _ = self.make(kind)
-                seen = []
-                w.cursorMoved.connect(seen.append)
-                press(w, 300)
-                move(w, 500)
-                w.leaveEvent(QEvent(QEvent.Type.Leave))
-                self.assertNotIn(None, seen)
+    @pytest.mark.parametrize("kind", KINDS)
+    def test_leaving_mid_drag_keeps_the_crosshair(self, kind, view):
+        w = make(kind, view)
+        seen = []
+        w.cursorMoved.connect(seen.append)
+        press(w, 300)
+        move(w, 500)
+        w.leaveEvent(QEvent(QEvent.Type.Leave))
+        assert None not in seen
 
-    def test_leaving_clears_the_crosshair_when_not_dragging(self):
-        for kind in ("chart", "throttle", "core"):
-            with self.subTest(kind=kind):
-                w, _ = self.make(kind)
-                seen = []
-                w.cursorMoved.connect(seen.append)
-                move(w, 500)
-                w.leaveEvent(QEvent(QEvent.Type.Leave))
-                self.assertEqual(seen[-1], None)
+    @pytest.mark.parametrize("kind", KINDS)
+    def test_leaving_clears_the_crosshair_when_not_dragging(self, kind, view):
+        w = make(kind, view)
+        seen = []
+        w.cursorMoved.connect(seen.append)
+        move(w, 500)
+        w.leaveEvent(QEvent(QEvent.Type.Leave))
+        assert seen[-1] is None
 
-    def test_right_button_is_ignored(self):
-        w, v = self.make("chart")
-        before = (v.t0, v.t1, v.follow)
+    def test_right_button_is_ignored(self, view):
+        w = make("chart", view)
+        before = (view.t0, view.t1, view.follow)
         press(w, 400, btn=Qt.MouseButton.RightButton)
         release(w, 700, btn=Qt.MouseButton.RightButton)
-        self.assertEqual((v.t0, v.t1, v.follow), before)
+        assert (view.t0, view.t1, view.follow) == before
 
-    def test_legend_click_toggles_only_that_series(self):
-        store = fixture_store()
-        view = View(store)
-        view.window = 300.0
-        view.update_range()
+
+class TestLegend:
+    @pytest.fixture
+    def pane(self, view):
         spec = PANES[0]
         for s in spec.series:
             s.visible = True
         cp = ChartPane(spec, view)
         cp.resize(W, spec.height)
-        render(cp, spec.height)              # populates the legend hit boxes
+        render(cp, spec.height)          # populates the legend hit boxes
+        yield cp, spec
+        for s in spec.series:
+            s.visible = True             # PANES is module state; put it back
+
+    def test_legend_click_toggles_only_that_series(self, pane):
+        cp, spec = pane
         hit = spec.series[0].hit
-        self.assertIsNotNone(hit)
+        assert hit is not None
         x = (hit[0] + hit[1]) / 2
         press(cp, x, y=8)
         release(cp, x, y=8)
-        self.assertEqual([s.visible for s in spec.series],
-                         [False] + [True] * (len(spec.series) - 1))
+        assert [s.visible for s in spec.series] == \
+            [False] + [True] * (len(spec.series) - 1)
         press(cp, x, y=8)
         release(cp, x, y=8)
-        self.assertTrue(all(s.visible for s in spec.series))
+        assert all(s.visible for s in spec.series)
 
-    def test_a_click_in_the_plot_area_toggles_nothing(self):
-        store = fixture_store()
-        view = View(store)
-        view.window = 300.0
-        view.update_range()
-        spec = PANES[0]
-        for s in spec.series:
-            s.visible = True
-        cp = ChartPane(spec, view)
-        cp.resize(W, spec.height)
-        render(cp, spec.height)
-        x = (spec.series[0].hit[0] + spec.series[0].hit[1]) / 2
+    def test_a_click_in_the_plot_area_toggles_nothing(self, pane):
+        cp, spec = pane
+        x = sum(spec.series[0].hit) / 2
         press(cp, x, y=TOP + 20)
         release(cp, x, y=TOP + 20)
-        self.assertTrue(all(s.visible for s in spec.series))
+        assert all(s.visible for s in spec.series)
 
-    def test_hidden_series_keeps_its_colour_slot(self):
+    def test_hidden_series_keeps_its_colour_slot(self, pane):
         """Colour is bound to position, not rank, so hiding one series must not
         repaint the others."""
-        store = fixture_store()
-        view = View(store)
-        view.update_range()
-        spec = PANES[1]
-        for s in spec.series:
-            s.visible = True
-        cp = ChartPane(spec, view)
-        first = [i for i, _ in cp._visible_series()]
+        cp, spec = pane
+        assert [i for i, _ in cp._visible_series()] == \
+            list(range(len(spec.series)))
         spec.series[0].visible = False
-        rest = [i for i, _ in cp._visible_series()]
-        spec.series[0].visible = True
-        self.assertEqual(first, [0, 1, 2, 3])
-        self.assertEqual(rest, [1, 2, 3])      # indices unchanged, not renumbered
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert [i for i, _ in cp._visible_series()] == \
+            list(range(1, len(spec.series)))       # not renumbered

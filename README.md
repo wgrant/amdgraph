@@ -31,14 +31,24 @@ legend entry to hide that series.
 
 ## Requirements
 
-Python 3, `numpy`, `PyQt6`. On Debian/Ubuntu:
+Python 3.9+, `numpy`, `PyQt6`. Either get them from the distribution:
 
 ```
 apt install python3-numpy python3-pyqt6
+./amdgraph
 ```
 
-No install step — `./amdgraph` runs from the checkout, and a symlink to it from
-anywhere on your `PATH` works too.
+or let [uv](https://docs.astral.sh/uv/) manage them:
+
+```
+uv run amdgraph
+```
+
+Both work, and neither is the primary. The distribution path matters because
+one of the machines this targets is a Steam Deck, where the useful thing is to
+clone and run rather than to provision an environment; `./amdgraph` is a
+launcher that puts `src/` on `sys.path` and needs no install step, and a symlink
+to it from anywhere on your `PATH` works too.
 
 **It never needs root**, and that is deliberate rather than incidental: a
 monitor that shells out to a privileged helper once a second becomes a top
@@ -163,15 +173,26 @@ map up through sampling, storage, drawing primitives and widgets to the window.
 Each module states what it is allowed to import, and that is enforced:
 
 ```
-tools/run-tests            # layering, unit tests, and the launcher's --help
+uv run pytest              # or: pytest, from a checkout with system packages
 ```
 
-The tests are stdlib `unittest`, no pytest — the install story is "clone it and
-run it", and a suite that needs a package the program does not is a suite that
-goes unrun on the machine where something broke. Nothing touches real hardware;
-device discovery, the pm_table decode and the version guards all run against
-synthetic trees and blobs under a temp dir. Qt tests render offscreen and skip
-themselves if PyQt6 is absent.
+The layering check is one of the tests, and also stands alone as
+`tools/check-layers.py` if you want it in a pre-commit hook.
+
+Nothing in the suite touches real hardware. Device discovery, the pm_table
+decode and the `gpu_metrics` version guards all run against synthetic trees and
+blobs under `tmp_path`, so the tests are meaningful on a machine with no AMD
+part in it — which is the only way to test the paths that matter for the parts
+this does not support yet. Qt tests render offscreen and skip if PyQt6 is
+absent. Both invocations above are checked: `uv run pytest` against the locked
+environment, and a bare checkout where `conftest.py` falls back to putting
+`src/` on `sys.path`.
+
+They are weighted toward the guards rather than the arithmetic. The one failure
+this program is built to avoid is printing a plausible number off a layout
+nobody verified, so the tests asserting that it *refuses* — v2_2, v2_4, v3_0,
+v1_3, right version wrong size, truncated, absent — carry more weight than any
+that check a decode.
 
 There are deliberately no golden pixel hashes. Pane rendering draws text, so a
 hash fingerprints the font stack as much as the code, and a golden file that
