@@ -419,6 +419,8 @@ class Main(QMainWindow):
                 self.service.data_dir = DATA_DIR
                 self.service.start_recording()
                 self.recorder = self.service.recorder
+                if self.recorder is None:
+                    raise OSError("history service did not start CSV recording")
             except OSError as e:
                 QMessageBox.warning(self, "amdgraph",
                                     f"Cannot record: {e}")

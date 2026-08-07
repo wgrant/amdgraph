@@ -77,6 +77,14 @@ sees, which is what makes a recording and a live session interchangeable: `Open`
 swaps `View.store` for one loaded from disk and every pane follows, with the
 live buffer left untouched underneath.
 
+`LocalHistoryService` owns the sampler, live Store, markers, and CSV writer.
+Qt and Rich are clients of that interface. `amdgraphd` exposes it over a
+versioned Unix-socket snapshot-plus-stream protocol; `RemoteHistoryService`
+maintains the same Store-shaped client view and reconnects without involving
+frontend code. The daemon additionally writes one JSON telemetry object per
+sample to SQLite WAL—not one row per metric—so range reads and crash recovery
+remain cheap while CSV stays available for interchange.
+
 Missing values are NaN, never zero. A sensor that vanishes must leave a hole in
 the trace, not a cliff to the floor, and `polylines()` splits on NaN to draw it
 that way.

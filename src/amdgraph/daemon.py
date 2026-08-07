@@ -132,6 +132,19 @@ def main(argv=None):
     parser.add_argument("--database", default=DEFAULT_DATABASE)
     parser.add_argument("--retention", type=float, metavar="SECONDS",
                         default=DEFAULT_RETENTION)
+    migration = parser.add_mutually_exclusive_group()
+    migration.add_argument("--import-csv", metavar="FILE")
+    migration.add_argument("--export-csv", metavar="FILE")
     args = parser.parse_args(argv)
+    if args.import_csv or args.export_csv:
+        history = SQLiteHistory(args.database, args.retention)
+        try:
+            if args.import_csv:
+                history.import_csv(args.import_csv)
+            else:
+                history.export_csv(args.export_csv)
+        finally:
+            history.close()
+        return 0
     asyncio.run(serve(max(0.1, args.interval), args.socket,
                       args.database, args.retention))

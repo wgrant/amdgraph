@@ -218,6 +218,40 @@ nobody verified, so the tests asserting that it *refuses* — v2_2, v2_4, v3_0,
 v1_3, right version wrong size, truncated, absent — carry more weight than any
 that check a decode.
 
+## Persistent service and terminal client
+
+The Qt application can still sample locally, but `amdgraphd` can own sampling
+and history so closing a frontend loses nothing:
+
+```sh
+amdgraphd                         # Unix socket + seven-day SQLite history
+amdgraph --socket "$XDG_RUNTIME_DIR/amdgraph.sock"
+amdgraph-tui --socket "$XDG_RUNTIME_DIR/amdgraph.sock"
+```
+
+The database defaults to `~/.local/state/amdgraph/history.sqlite3` in WAL mode.
+Clients receive the newest hour, then a gap-free live stream; older ranges stay
+queryable from the server. CSV remains the interchange format:
+
+```sh
+amdgraphd --export-csv history.csv
+amdgraphd --import-csv old-session.csv
+```
+
+To run it as a user service:
+
+```sh
+mkdir -p ~/.config/systemd/user
+cp systemd/amdgraph.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now amdgraph.service
+```
+
+The installed executable path in the supplied unit assumes a normal
+`pip install --user`/`uv tool install`; adjust `ExecStart` if installed
+elsewhere. The wire format and compatibility rules are in
+[`docs/PROTOCOL.md`](docs/PROTOCOL.md).
+
 ### The source protocol
 
 `Main` takes a `source=` and uses exactly six methods of it — `sample()`,

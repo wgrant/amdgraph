@@ -4,6 +4,7 @@ import json
 import socket
 import threading
 import time
+from types import SimpleNamespace
 
 from .protocol import PROTOCOL_VERSION, apply_snapshot, encode
 from .store import Store
@@ -15,6 +16,8 @@ class RemoteHistoryService:
         self.store = Store()
         self.interval = 1.0
         self.recorder = None
+        self.data_dir = ""
+        self._recording_changed = threading.Event()
         self.source = self
         self._capabilities = ()
         self._metadata = {}
@@ -66,6 +69,10 @@ class RemoteHistoryService:
             elif kind == "marker":
                 self.store.markers.append((float(message["t"]),
                                            str(message["label"])))
+            elif kind == "recording":
+                path = message.get("path")
+                self.recorder = (SimpleNamespace(path=path) if path else None)
+                self._recording_changed.set()
 
     def _send(self, message):
         sock = self._socket
@@ -103,10 +110,15 @@ class RemoteHistoryService:
         self._send({"type": "snapshot", "start": start, "end": end})
 
     def start_recording(self, path=None):
+        self._recording_changed.clear()
         self._send({"type": "record_start", "path": path})
+        self._recording_changed.wait(2.0)
+        return None if self.recorder is None else self.recorder.path
 
     def stop_recording(self):
+        self._recording_changed.clear()
         self._send({"type": "record_stop"})
+        self._recording_changed.wait(2.0)
 
     def close(self):
         self._stop.set()
