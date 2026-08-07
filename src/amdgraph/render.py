@@ -30,10 +30,17 @@ LEFT = 72          # y-axis gutter, and the cap-reason / per-core row labels
 RIGHT = 104        # room for end-of-line direct labels
 HEADER_H = 26      # the header row of widgets above each painted body
 INDENT = 14        # how far a grouped pane sits inside its section
-TOP = 2            # breathing room at the top of the body itself
+# Insets at the top and bottom of the body. Axis tick labels are centred on
+# their gridline, and the outermost two sit exactly on the plot's edges, so
+# without half a line of clearance inside the body they are cut in half by it.
+# Calibrated from the font for the same reason the gutters are: these were
+# fixed counts, and the top one went from 26 to 2 when the header became its
+# own widget, which cut the top label off at any font size.
+TOP = 2
 BOTTOM = 6
 
 _DEFAULT_LEFT, _DEFAULT_RIGHT = LEFT, RIGHT
+_DEFAULT_TOP, _DEFAULT_BOTTOM = TOP, BOTTOM
 
 
 def pane_font():
@@ -61,7 +68,7 @@ def calibrate(font, row_labels, series_labels):
     Never narrows below the defaults: the left gutter also has to hold y-axis
     tick text, which is not known until there is data.
     """
-    global LEFT, RIGHT
+    global LEFT, RIGHT, TOP, BOTTOM
     fm = QFontMetrics(font)
     LEFT = max(_DEFAULT_LEFT,
                max((fm.horizontalAdvance(s) for s in row_labels), default=0)
@@ -69,6 +76,9 @@ def calibrate(font, row_labels, series_labels):
     RIGHT = max(_DEFAULT_RIGHT,
                 max((fm.horizontalAdvance(s) for s in series_labels),
                     default=0) + 20)
+    half = int(math.ceil(fm.height() / 2)) + 1
+    TOP = max(_DEFAULT_TOP, half)
+    BOTTOM = max(_DEFAULT_BOTTOM, half)
     return LEFT, RIGHT
 
 

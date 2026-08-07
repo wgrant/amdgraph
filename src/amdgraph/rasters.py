@@ -19,7 +19,7 @@ from .fields import N_CORES, THROTTLE_BITS
 from .palette import (CRITICAL, INK, INK_DIM, LUT, MUTED, PANE_BG, RAMP,
                       SERIES, alpha)
 from .panes import CAP_DEFAULT, CAP_RATES, HEAT_MODES
-from .render import TOP, column_hold, draw_markers, fmt_val, row_label_font
+from .render import column_hold, draw_markers, fmt_val, row_label_font
 from .timepane import TimePane
 
 
@@ -49,7 +49,7 @@ class ThrottlePane(TimePane):
     def __init__(self, view, parent=None):
         super().__init__(view, parent)
         self.cap_hz = CAP_RATES[CAP_DEFAULT][0]
-        self.fix_height(TOP + len(THROTTLE_BITS) * self.ROW + 8)
+        self.fix_height(render.TOP + len(THROTTLE_BITS) * self.ROW + 8)
         self._buf = None
         # Row labels get their own smaller font: "PROCHOT CPU" is the longest
         # name here and does not fit the shared gutter at body size. The gutter
@@ -59,7 +59,7 @@ class ThrottlePane(TimePane):
 
     def plot_rect(self):
         left = self.gutter_left()
-        return QRectF(left, TOP,
+        return QRectF(left, render.TOP,
                       max(10, self.width() - left - render.RIGHT),
                       len(THROTTLE_BITS) * self.ROW)
 
@@ -140,7 +140,7 @@ class CorePane(TimePane):
     def __init__(self, view, parent=None):
         super().__init__(view, parent)
         self.mode = 0
-        self.fix_height(TOP + N_CORES * self.ROW + 18)
+        self.fix_height(render.TOP + N_CORES * self.ROW + 18)
         self._buf = None
 
     def set_mode(self, i):
@@ -149,7 +149,7 @@ class CorePane(TimePane):
 
     def plot_rect(self):
         left = self.gutter_left()
-        return QRectF(left, TOP,
+        return QRectF(left, render.TOP,
                       max(10, self.width() - left - render.RIGHT),
                       N_CORES * self.ROW)
 

@@ -28,7 +28,6 @@ from amdgraph.panes import (CAP_DEFAULT, CAP_RATES,            # noqa: E402
                             HEAT_MODES, PANES)
 from amdgraph.rasters import (CorePane, ThrottlePane,          # noqa: E402
                               core_frame, throttle_frame)
-from amdgraph.render import TOP                               # noqa: E402
 from amdgraph.store import Store                              # noqa: E402
 from amdgraph.view import View                                # noqa: E402
 
@@ -120,6 +119,25 @@ class TestGutters:
         f.setPointSizeF(4.0)
         left, right = render.calibrate(f, rows, series)
         assert (left, right) >= (render._DEFAULT_LEFT, render._DEFAULT_RIGHT)
+
+    @pytest.mark.parametrize("pt", [6.0, 7.5, 9.0, 11.0, 14.0, 20.0])
+    def test_the_outermost_tick_labels_fit_inside_the_body(self, view, pt):
+        """Tick labels are centred on their gridline and the outermost two sit
+        on the plot's own edges, so the body needs half a line of clearance at
+        each end. It had 2 px at the top after the header moved out, which cut
+        the top label in half at every font size."""
+        rows, series = self.rows_and_series()
+        f = QFont()
+        f.setPointSizeF(pt)
+        render.calibrate(f, rows, series)
+        fm = QFontMetrics(f)
+        spec = PANES[0]
+        body = ChartPane(spec, view)
+        body.resize(W, spec.height - render.HEADER_H)
+        r = body.plot_rect()
+        assert r.top() - fm.height() / 2 >= 0, "top tick label is clipped"
+        assert r.bottom() + fm.height() / 2 <= body.height(), \
+            "bottom tick label is clipped"
 
     def test_panes_and_axis_agree_after_recalibration(self, view):
         rows, series = self.rows_and_series()

@@ -16,8 +16,8 @@ from . import render
 from .frame import PaneFrame, Readout
 from .palette import (AXIS, CRITICAL, GRID, INK, INK_DIM, MUTED, PANE_BG,
                       SERIES, WARNING, alpha)
-from .render import (BOTTOM, HEADER_H, TOP, draw_markers, fmt_val,
-                     nice_range, polylines, time_ticks)
+from .render import (HEADER_H, draw_markers, fmt_val, nice_range,
+                     polylines, time_ticks)
 from .timepane import TimePane
 
 
@@ -45,9 +45,9 @@ class ChartPane(TimePane):
         if self._rect is None:
             left = self.gutter_left()
             self._rect = QRectF(
-                left, TOP,
+                left, render.TOP,
                 max(10, self.width() - left - render.RIGHT),
-                max(10, self.height() - TOP - BOTTOM))
+                max(10, self.height() - render.TOP - render.BOTTOM))
         return self._rect
 
     def y_of(self, v):
