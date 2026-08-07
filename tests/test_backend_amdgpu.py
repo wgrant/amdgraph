@@ -6,7 +6,7 @@ avoid, so the tests that assert it *refuses* are the load-bearing ones.
 """
 
 import pytest
-from conftest import gm_blob
+from conftest import gm_blob, gm3_blob
 
 from amdgraph import fields
 from amdgraph.backends import amdgpu
@@ -28,10 +28,15 @@ def test_accepts_the_verified_layout(check_gm):
     assert ok and note == ""
 
 
+def test_accepts_strix_gpu_metrics_v3(check_gm):
+    ok, note = check_gm(gm3_blob())
+    assert ok and note == ""
+
+
 @pytest.mark.parametrize("kwargs, needle", [
     (dict(fmt_rev=2, cont_rev=2), "v2_2"),      # Renoir; has indep_throttle
     (dict(fmt_rev=2, cont_rev=4), "v2_4"),      # Van Gogh on newer firmware
-    (dict(fmt_rev=3, cont_rev=0, size=400), "v3_0"),   # Strix Point / Halo
+    (dict(fmt_rev=3, cont_rev=0, size=400), "v3_0"),   # wrong v3_0 size
     (dict(fmt_rev=1, cont_rev=3, size=160), "v1_3"),   # a discrete part
 ])
 def test_rejects_layouts_we_have_not_verified(check_gm, kwargs, needle):
@@ -116,3 +121,38 @@ def test_throttle_bits_are_contiguous_and_named():
     assert [b for b, _n, _f in fields.THROTTLE_BITS] == list(range(13))
     families = {n: f for _b, n, f in fields.THROTTLE_BITS}
     assert families["PROCHOT CPU"] == "prochot"
+
+
+def test_decodes_strix_v3_and_differences_residencies(tmp_path):
+    path = tmp_path / "gpu_metrics"
+    path.write_bytes(gm3_blob())
+    backend = AmdGpuBackend(str(tmp_path), str(path), True, "", RealFS())
+    try:
+        first = {}
+        backend._metrics_v3(first, RealFS())
+        assert first["pwr_socket"] == pytest.approx(70.0)
+        assert first["pwr_ipu"] == pytest.approx(5.0)
+        assert first["pwr_system"] == pytest.approx(50.0)
+        assert first["thm_gfx"] == pytest.approx(55.0)
+        assert first["vcn_busy"] == 3.0
+        assert first["ipu_busy_7"] == 17.0
+        assert first["ipu_busy_mean"] == pytest.approx(13.5)
+        assert first["core_temp_15"] == pytest.approx(40.15)
+        assert first["core_power_sum"] == pytest.approx(40.0)
+        assert first["dram_rd"] == pytest.approx(2.0)
+        assert first["ipu_rd"] == pytest.approx(0.5)
+        assert first["ipu_wr"] == pytest.approx(0.25)
+        assert first["core_freq_15"] == 3015.0
+        assert first["core_freq_limit"] == 5100.0
+        assert first["gfx_clk_max"] == 2900.0
+        assert first["stapm_lim"] == pytest.approx(55.0)
+        assert "thr0" not in first
+
+        path.write_bytes(gm3_blob(residencies=(0, 10, 0, 4, 0, 0, 0)))
+        second = {}
+        backend._metrics_v3(second, RealFS())
+        assert second["thr0"] == 1.0       # SPL advanced
+        assert second["thr1"] == 0.0       # FPPT did not
+        assert second["thr2"] == 1.0       # SPPT advanced
+    finally:
+        backend.close()

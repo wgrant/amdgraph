@@ -16,7 +16,7 @@ May import: fields, sysfs, backends.base.
 
 import struct
 
-from ..fields import (N_CORES, PM_CORE, PM_SCALAR, PM_TABLE, PM_VERSION,
+from ..fields import (PHOENIX_CORES, PM_CORE, PM_SCALAR, PM_TABLE, PM_VERSION,
                      PM_VER_SUPPORTED)
 from .base import Backend
 
@@ -38,7 +38,7 @@ class ZenSmuBackend(Backend):
         # unevenly the scheduler is spreading load, which changes what the
         # power budget buys you.
         for base_key, (base, scale) in PM_CORE.items():
-            vals = [v[base + i] * scale for i in range(N_CORES)
+            vals = [v[base + i] * scale for i in range(PHOENIX_CORES)
                     if base + i < n]
             if not vals:
                 continue
@@ -47,7 +47,7 @@ class ZenSmuBackend(Backend):
             s[f"{base_key}_mean"] = sum(vals) / len(vals)
             s[f"{base_key}_max"] = max(vals)
         if "core_power_mean" in s:
-            s["core_power_sum"] = s["core_power_mean"] * N_CORES
+            s["core_power_sum"] = s["core_power_mean"] * PHOENIX_CORES
 
         # Unused budget: limit minus value. This is the signal that
         # separates "throttled because it ran out of power" from "held down
@@ -81,5 +81,5 @@ def probe(fs):
     if ver != PM_VER_SUPPORTED:
         return None, (f"pm_table version {ver:#010x} is not decoded "
                       f"(this build maps {PM_VER_SUPPORTED:#010x}) -- "
-                      "SMU panes are empty.")
+                      "pm_table-only series are empty.")
     return ZenSmuBackend(), ""

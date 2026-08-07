@@ -41,6 +41,25 @@ class ThinkpadBackend(Backend):
         s["fan_cmd"], s["fan_mode"] = fan_command(self.tp, fs)
 
 
+class CrosEcBackend(Backend):
+    """Framework's ChromeOS EC hwmon interface.
+
+    Labels in the hwmon node identify these independently of its moving index.
+    On the Strix Halo Framework Desktop the CPU and mainboard ambient channels
+    are temp4 and temp3 respectively; unlike thinkpad_acpi there is no exposed
+    fan-command mode, only achieved RPM and a target for fan 1.
+    """
+
+    def __init__(self, ec):
+        self.ec = ec
+
+    def sample(self, s, fs):
+        s["ec_cpu"] = fs.read_num(f"{self.ec}/temp4_input", 1000)
+        s["ec_skin"] = fs.read_num(f"{self.ec}/temp3_input", 1000)
+        s["fan1"] = fs.read_num(f"{self.ec}/fan1_input")
+        s["fan2"] = fs.read_num(f"{self.ec}/fan2_input")
+
+
 def fan_command(tp, fs):
     """(level, mode) as COMMANDED by software, not as achieved.
 
@@ -69,7 +88,9 @@ def probe(fs):
     """Silent when absent: most machines simply aren't ThinkPads, which is
     not a degraded condition worth a status-bar note the way an unsupported
     pm_table version is."""
-    tp = find_hwmon(fs=fs).get("thinkpad")
-    if not tp:
-        return None, ""
-    return ThinkpadBackend(tp), ""
+    hwmon = find_hwmon(fs=fs)
+    if tp := hwmon.get("thinkpad"):
+        return ThinkpadBackend(tp), ""
+    if ec := hwmon.get("cros_ec"):
+        return CrosEcBackend(ec), ""
+    return None, ""

@@ -93,7 +93,12 @@ PM_CORE = {
     "core_c0":      (569,  1.0),
     "core_cc6":     (585,  1.0),
 }
-N_CORES = 8
+# The rendering/storage ceiling. gpu_metrics_v3_0, used by Strix Point and
+# Strix Halo, publishes sixteen physical cores. Older backends simply omit the
+# rows they do not own; a future topology-aware catalogue can hide those empty
+# rows rather than making the hardware decoder lie about the ABI's width.
+N_CORES = 16
+PHOENIX_CORES = 8
 
 # The amdgpu device is discovered, not named. It was hardcoded to card1 for as
 # long as this only ran on one machine, which is true there and false almost
@@ -146,6 +151,35 @@ GM_THROTTLE_OFF = 108
 # nothing else in this program needs privileges.
 GM_PWR_OFF = 40
 GM_CORE_PWR_OFF = 48
+
+# gpu_metrics_v3_0 is the mainline kernel ABI used by Strix Point / Strix Halo.
+# Unlike the undocumented pm_table it is declared by the driver, including the
+# units, and this exact 264-byte layout was observed on the Ryzen AI MAX+ 395
+# used for the port. Offsets follow struct gpu_metrics_v3_0 in
+# drivers/gpu/drm/amd/include/kgd_pp_interface.h; natural alignment matters at
+# system_clock_counter and average_apu_power.
+GM3_VERSION = (3, 0)
+GM3_SIZE = 264
+GM3_ACTIVITY_OFF = 42
+GM3_IPU_ACTIVITY_OFF = 46
+GM3_DRAM_BW_OFF = 94
+GM3_IPU_BW_OFF = 98
+GM3_SYSTEM_CLOCK_OFF = 104
+GM3_SOCKET_PWR_OFF = 112
+GM3_IPU_PWR_OFF = 116
+GM3_APU_PWR_OFF = 120
+GM3_GFX_PWR_OFF = 124
+GM3_DGPU_PWR_OFF = 128
+GM3_ALL_CORE_PWR_OFF = 132
+GM3_CORE_PWR_OFF = 136
+GM3_SYS_PWR_OFF = 168
+GM3_STAPM_LIMIT_OFF = 170
+GM3_STAPM_CURRENT_LIMIT_OFF = 172
+GM3_CLOCKS_OFF = 174
+GM3_CORE_CLOCK_OFF = 190
+GM3_CORE_MAXFREQ_OFF = 222
+GM3_GFX_MAXFREQ_OFF = 224
+GM3_RESIDENCY_OFF = 228
 
 THROTTLE_BITS = [
     (0,  "SPL",         "power"),

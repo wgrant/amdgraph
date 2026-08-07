@@ -13,7 +13,15 @@ import threading
 import time
 
 from ..fields import (AMD_VENDOR, DRM_DEVICES, GM_CORE_PWR_OFF, GM_PWR_OFF,
-                     GM_SIZE, GM_THROTTLE_OFF, GM_VERSION, THROTTLE_BITS)
+                     GM_SIZE, GM_THROTTLE_OFF, GM_VERSION, GM3_ACTIVITY_OFF,
+                     GM3_ALL_CORE_PWR_OFF, GM3_APU_PWR_OFF, GM3_CLOCKS_OFF,
+                     GM3_CORE_CLOCK_OFF, GM3_CORE_MAXFREQ_OFF,
+                     GM3_CORE_PWR_OFF, GM3_DGPU_PWR_OFF, GM3_DRAM_BW_OFF,
+                     GM3_GFX_MAXFREQ_OFF, GM3_GFX_PWR_OFF,
+                     GM3_IPU_ACTIVITY_OFF, GM3_IPU_BW_OFF, GM3_IPU_PWR_OFF,
+                     GM3_RESIDENCY_OFF, GM3_SIZE, GM3_SOCKET_PWR_OFF,
+                     GM3_STAPM_CURRENT_LIMIT_OFF, GM3_STAPM_LIMIT_OFF,
+                     GM3_SYS_PWR_OFF, GM3_VERSION, THROTTLE_BITS)
 from ..sysfs import RealFS, dpm_current, find_drm_device, find_hwmon
 from .base import Backend
 
@@ -37,10 +45,13 @@ def check_gpu_metrics(path, fs):
     if len(raw) < 4:
         return False, "gpu_metrics too short — no cap reasons"
     size, fmt_rev, cont_rev = struct.unpack_from("<HBB", raw, 0)
-    if (fmt_rev, cont_rev) != GM_VERSION or size != GM_SIZE:
+    supported = (((fmt_rev, cont_rev) == GM_VERSION and size == GM_SIZE) or
+                 ((fmt_rev, cont_rev) == GM3_VERSION and size == GM3_SIZE))
+    if not supported:
         return False, (f"gpu_metrics v{fmt_rev}_{cont_rev} ({size}B) is not "
                        f"decoded (this build maps v{GM_VERSION[0]}_"
-                       f"{GM_VERSION[1]}, {GM_SIZE}B) — no cap reasons")
+                       f"{GM_VERSION[1]} and v{GM3_VERSION[0]}_"
+                       f"{GM3_VERSION[1]}) — no cap reasons")
     return True, ""
 
 
@@ -162,7 +173,13 @@ class AmdGpuBackend(Backend):
         # life at up to 50 Hz -- burning ~1.2% of a core unpacking offsets
         # that mean nothing on this part. Withholding the path is the one
         # guard every caller goes through.
-        self.throttle = ThrottleSampler(gpu_metrics if gm_ok else None, fs)
+        raw = fs.read_bytes(gpu_metrics) if gm_ok else None
+        self.gm_version = tuple(raw[2:4]) if raw and len(raw) >= 4 else None
+        # v3 has hardware-maintained residency counters and must not run the
+        # Phoenix high-rate instantaneous-bit poller.
+        poll_path = gpu_metrics if self.gm_version == GM_VERSION else None
+        self.throttle = ThrottleSampler(poll_path, fs)
+        self._residency_prev = None
         self.throttle.start()
 
     def notes(self):
@@ -181,7 +198,105 @@ class AmdGpuBackend(Backend):
             if w is None:
                 w = fs.read_num(f"{amd}/power1_input", 1_000_000)
             s["gpu_power"] = w
-        self._throttle(s, fs)
+        if self.gm_version == GM3_VERSION:
+            self._metrics_v3(s, fs)
+        else:
+            self._throttle(s, fs)
+
+    @staticmethod
+    def _valid(x, scale=1.0):
+        """The SMU uses all-ones as an unpopulated marker at each width."""
+        return None if x in (0xFFFF, 0xFFFFFFFF) else x / scale
+
+    def _metrics_v3(self, s, fs):
+        """Decode the kernel-declared Strix Point/Halo metrics ABI.
+
+        The residency counters advance in PM_TIMER cycles when a reason is
+        engaged, but v3_0 does not publish MetricsCounter (the matching total).
+        A delta can therefore establish that a limiter was active during this
+        UI interval, but cannot honestly be normalised into a duty fraction.
+        """
+        raw = fs.read_bytes(self.gpu_metrics)
+        if raw is None or len(raw) != GM3_SIZE:
+            return
+        u16 = lambda off, n=1: struct.unpack_from(f"<{n}H", raw, off)
+        u32 = lambda off: struct.unpack_from("<I", raw, off)[0]
+
+        # SMU14 exports these in centi-Celsius (confirmed against amdgpu
+        # hwmon: 3538 here while temp1_input reported 35.0 C).
+        s["thm_gfx"] = self._valid(u16(4)[0], 100.0)
+        s["thm_soc"] = self._valid(u16(6)[0], 100.0)
+        temps = u16(8, 16)
+        for i, val in enumerate(temps):
+            if val not in (0, 0xFFFF):
+                s[f"core_temp_{i}"] = val / 100.0
+        skin = u16(40)[0]
+        if skin not in (0, 0xFFFF):
+            s["stt"] = skin / 100.0
+        gfx_busy, vcn_busy = u16(GM3_ACTIVITY_OFF, 2)
+        s["gpu_busy"] = self._valid(gfx_busy)
+        s["vcn_busy"] = self._valid(vcn_busy)
+        ipu_busy = u16(GM3_IPU_ACTIVITY_OFF, 8)
+        for i, val in enumerate(ipu_busy):
+            s[f"ipu_busy_{i}"] = self._valid(val)
+        valid_ipu = [x for x in ipu_busy if x != 0xFFFF]
+        if valid_ipu:
+            s["ipu_busy_mean"] = sum(valid_ipu) / len(valid_ipu)
+        c0 = u16(62, 16)
+        for i, val in enumerate(c0):
+            s[f"core_c0_{i}"] = self._valid(val)
+        valid_c0 = [x for x in c0 if x != 0xFFFF]
+        if valid_c0:
+            s["core_c0_mean"] = sum(valid_c0) / len(valid_c0)
+        # The ABI says MB/s; chart units are GiB/s.
+        s["dram_rd"] = self._valid(u16(GM3_DRAM_BW_OFF)[0], 1024.0)
+        s["dram_wr"] = self._valid(u16(GM3_DRAM_BW_OFF + 2)[0], 1024.0)
+        s["ipu_rd"] = self._valid(u16(GM3_IPU_BW_OFF)[0], 1024.0)
+        s["ipu_wr"] = self._valid(u16(GM3_IPU_BW_OFF + 2)[0], 1024.0)
+
+        for key, off in (("pwr_socket", GM3_SOCKET_PWR_OFF),
+                         ("pwr_ipu", GM3_IPU_PWR_OFF),
+                         ("pwr_apu", GM3_APU_PWR_OFF),
+                         ("pwr_gfx", GM3_GFX_PWR_OFF),
+                         ("pwr_dgpu", GM3_DGPU_PWR_OFF),
+                         ("core_power_sum", GM3_ALL_CORE_PWR_OFF)):
+            s[key] = self._valid(u32(off), 1000.0)
+        for i, val in enumerate(u16(GM3_CORE_PWR_OFF, 16)):
+            s[f"core_power_{i}"] = self._valid(val, 1000.0)
+        s["pwr_system"] = self._valid(u16(GM3_SYS_PWR_OFF)[0], 1000.0)
+        s.setdefault("stapm_lim", self._valid(
+            u16(GM3_STAPM_CURRENT_LIMIT_OFF)[0], 1000.0))
+        # A verified pm_table backend, when present, owns the STAPM reading.
+        # On Strix Halo that backend declines the undocumented layout, so the
+        # kernel-declared socket power is the closest honest value available.
+        s.setdefault("stapm", s.get("pwr_socket"))
+
+        clocks = u16(GM3_CLOCKS_OFF, 8)
+        for key, val in zip(("gfx_clk", "socclk", "vpeclk", "ipuclk",
+                             "fclk", "vclk", "uclk", "mpipuclk"), clocks):
+            s[key] = self._valid(val)
+        coreclks = u16(GM3_CORE_CLOCK_OFF, 16)
+        for i, val in enumerate(coreclks):
+            s[f"core_freq_{i}"] = self._valid(val)
+        valid_clks = [x for x in coreclks if x != 0xFFFF]
+        if valid_clks:
+            s["core_freq_mean"] = sum(valid_clks) / len(valid_clks)
+            s["core_freq_max"] = max(valid_clks)
+        s["core_freq_limit"] = self._valid(u16(GM3_CORE_MAXFREQ_OFF)[0])
+        s["gfx_clk_max"] = self._valid(u16(GM3_GFX_MAXFREQ_OFF)[0])
+
+        cur = struct.unpack_from("<7I", raw, GM3_RESIDENCY_OFF)
+        if self._residency_prev is not None:
+            delta = [(a - b) & 0xFFFFFFFF
+                     for a, b in zip(cur, self._residency_prev)]
+            # v3 reasons map onto the existing Phoenix display rows by name.
+            for bit, idx in ((9, 0), (0, 1), (1, 2), (2, 3),
+                             (4, 4), (5, 5), (6, 6)):
+                s[f"thr{bit}"] = float(delta[idx] != 0)
+        self._residency_prev = cur
+
+    def reset(self, fs):
+        self._residency_prev = None
 
     def _throttle(self, s, fs):
         """Per-reason duty cycle over the interval, from the background

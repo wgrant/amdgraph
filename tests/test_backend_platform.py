@@ -40,3 +40,13 @@ def test_probe_is_silent_when_not_a_thinkpad():
     # This container/CI box is not a ThinkPad either way; either outcome
     # (found or not) must carry no note when nothing is wrong.
     assert note == ""
+
+
+def test_cros_ec_reads_framework_temperatures_and_fans(tmp_path):
+    for name, value in (("temp4_input", 41850), ("temp3_input", 33850),
+                        ("fan1_input", 900), ("fan2_input", 800)):
+        (tmp_path / name).write_text(f"{value}\n")
+    out = {}
+    platform.CrosEcBackend(str(tmp_path)).sample(out, RealFS())
+    assert out == {"ec_cpu": 41.85, "ec_skin": 33.85,
+                   "fan1": 900.0, "fan2": 800.0}

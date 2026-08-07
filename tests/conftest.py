@@ -79,6 +79,31 @@ def gm_blob(fmt_rev=2, cont_rev=1, size=120, throttle=0, socket=20000,
     return bytes(b)
 
 
+def gm3_blob(residencies=(0,) * 7):
+    """A naturally aligned gpu_metrics_v3_0 blob with known Strix values."""
+    from amdgraph import fields
+    b = bytearray(fields.GM3_SIZE)
+    struct.pack_into("<HBB", b, 0, fields.GM3_SIZE, *fields.GM3_VERSION)
+    struct.pack_into("<HH16HH", b, 4, 5500, 5000,
+                     *range(4000, 4016), 4200)
+    struct.pack_into("<HH8H16H4H", b, 42, 25, 3, *range(10, 18),
+                     *range(16), 2048, 1024, 512, 256)
+    struct.pack_into("<I", b, fields.GM3_SOCKET_PWR_OFF, 70000)
+    struct.pack_into("<I", b, fields.GM3_IPU_PWR_OFF, 5000)
+    struct.pack_into("<I", b, fields.GM3_APU_PWR_OFF, 65000)
+    struct.pack_into("<I", b, fields.GM3_GFX_PWR_OFF, 12000)
+    struct.pack_into("<I", b, fields.GM3_DGPU_PWR_OFF, 0)
+    struct.pack_into("<I", b, fields.GM3_ALL_CORE_PWR_OFF, 40000)
+    struct.pack_into("<16H", b, fields.GM3_CORE_PWR_OFF, *(2500,) * 16)
+    struct.pack_into("<3H", b, 168, 50000, 60000, 55000)
+    struct.pack_into("<8H", b, fields.GM3_CLOCKS_OFF,
+                     1800, 900, 600, 1000, 2000, 800, 1000, 700)
+    struct.pack_into("<16H", b, fields.GM3_CORE_CLOCK_OFF, *range(3000, 3016))
+    struct.pack_into("<2H", b, 222, 5100, 2900)
+    struct.pack_into("<7I", b, fields.GM3_RESIDENCY_OFF, *residencies)
+    return bytes(b)
+
+
 def pm_blob(values):
     """A 704-float pm_table with the given indices set."""
     a = [0.0] * 704
