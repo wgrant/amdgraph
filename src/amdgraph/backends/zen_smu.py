@@ -10,17 +10,17 @@ May import: fields, sysfs, backends.base.
 
 import struct
 
-from ..fields import PM_PROFILES, PM_TABLE, PM_VERSION, PM_VER_SUPPORTED
+from ..pm_tables import (PHOENIX_VERSION, PROFILES, TABLE, VERSION_PATH)
 from .base import Backend
 
 
 class ZenSmuBackend(Backend):
-    def __init__(self, version=PM_VER_SUPPORTED):
+    def __init__(self, version=PHOENIX_VERSION):
         self.version = version
-        self.scalars, self.cores, self.ncores = PM_PROFILES[version]
+        self.scalars, self.cores, self.ncores = PROFILES[version]
 
     def sample(self, s, fs):
-        raw = fs.read_bytes(PM_TABLE)
+        raw = fs.read_bytes(TABLE)
         if raw is None:
             return
         n = len(raw) // 4
@@ -46,7 +46,7 @@ class ZenSmuBackend(Backend):
         if "core_power_mean" in s:
             s["core_power_sum"] = s["core_power_mean"] * self.ncores
 
-        if self.version != PM_VER_SUPPORTED:
+        if self.version != PHOENIX_VERSION:
             # Strix Halo reports one thermal value per eight-core cluster. The
             # governing CPU temperature is the hotter cluster; its conservative
             # ceiling is the lower of their two limits.
@@ -78,7 +78,7 @@ class ZenSmuBackend(Backend):
 
 
 def probe(fs):
-    raw = fs.read_bytes(PM_VERSION)
+    raw = fs.read_bytes(VERSION_PATH)
     try:
         ver = None if raw is None else struct.unpack("<I", raw[:4])[0]
     except struct.error:
@@ -86,8 +86,8 @@ def probe(fs):
     if ver is None:
         return None, ("ryzen_smu not loaded -- SMU panes are empty. "
                       "modprobe ryzen_smu to populate them.")
-    if ver not in PM_PROFILES:
-        supported = ", ".join(f"{v:#010x}" for v in PM_PROFILES)
+    if ver not in PROFILES:
+        supported = ", ".join(f"{v:#010x}" for v in PROFILES)
         return None, (f"pm_table version {ver:#010x} is not decoded "
                       f"(this build maps {supported}) -- "
                       "pm_table-only series are empty.")

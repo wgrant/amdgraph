@@ -33,7 +33,7 @@ mainline `amdgpu`.
 (Strix Halo), Framework Desktop**, pm_table `0x0064020C`,
 `gpu_metrics_v3_0` (264 B), 16 cores in two L3 groups.
 
-The field map in `src/amdgraph/fields.py` is **measured**. What that meant:
+The PM-table maps in `src/amdgraph/pm_table_*.py` are **measured**. What that meant:
 
 - DRAM read/write (194/195): driven with 1/2/4/8 processes each scanning a
   128 MiB array over a 32–41 GB/s range. Correlation +0.997 against index 194
@@ -50,7 +50,7 @@ The field map in `src/amdgraph/fields.py` is **measured**. What that meant:
   pinned at its limit, FPPT 100%, nothing thermal at Tctl 87/100.
 
 Fields deliberately *not* plotted despite having plausible labels, each with its
-reasoning in `fields.py` or `panes.py`: `ppt_apu` (constant zero), indices 26/27
+reasoning in the relevant PM-table module or `panes.py`: `ppt_apu` (constant zero), indices 26/27
 ("FIT", pairing never confirmed), index 28 ("VID limit", the value routinely
 exceeds it), `average_gfx_power` (correlates +0.943 with the CPU core sum, not
 with GPU busy), `pwr_rest` (differencing noise an order of magnitude larger than
@@ -195,7 +195,8 @@ SoC.
 
 3. **Mark confidence per field.** A map should carry which fields are earned and
    which are guessed, and only earned ones should plot by default. This does not
-   exist yet and is the right shape for the `fields/` package.
+   is represented conservatively by keeping the evidence beside each field in
+   its version-specific `pm_table_*.py` module.
 
 4. **Write a backend, not an edit.** A module in `src/amdgraph/backends/`
    implementing `Backend` (`backends/base.py`) plus a module-level `probe(fs)`

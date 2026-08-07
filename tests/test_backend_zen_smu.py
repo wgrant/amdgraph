@@ -8,10 +8,11 @@ avoid, so the tests that assert it *refuses* are the load-bearing ones.
 import pytest
 from conftest import pm_blob
 
-from amdgraph import fields
+from amdgraph import fields, pm_tables
 from amdgraph.backends import zen_smu
-from amdgraph.fields import (N_CORES, PM_HALO_VER_SUPPORTED, PM_PROFILES,
-                             PM_VER_SUPPORTED)
+from amdgraph.fields import N_CORES
+from amdgraph.pm_tables import (PHOENIX_VERSION, PROFILES,
+                               STRIX_HALO_VERSION)
 from amdgraph.sysfs import RealFS
 
 
@@ -23,7 +24,7 @@ class TestPmDecode:
         def run(values):
             p = tmp_path / "pm_table"
             p.write_bytes(pm_blob(values))
-            monkeypatch.setattr(zen_smu, "PM_TABLE", str(p))
+            monkeypatch.setattr(zen_smu, "TABLE", str(p))
             out = {}
             backend.sample(out, RealFS())
             return out
@@ -64,9 +65,9 @@ class TestPmDecode:
                            852 + i: 60.0})
         p = tmp_path / "pm_table"
         p.write_bytes(pm_blob(values, size=1034))
-        monkeypatch.setattr(zen_smu, "PM_TABLE", str(p))
+        monkeypatch.setattr(zen_smu, "TABLE", str(p))
         s = {}
-        zen_smu.ZenSmuBackend(PM_HALO_VER_SUPPORTED).sample(s, RealFS())
+        zen_smu.ZenSmuBackend(STRIX_HALO_VERSION).sample(s, RealFS())
         assert s["stapm"] == 42.0
         assert s["ppt_fast_lim"] == 115.0
         assert s["tctl"] == 75.0
@@ -83,7 +84,7 @@ class TestPmDecode:
 
 class TestProbe:
     def test_missing_driver_reports_and_declines(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(zen_smu, "PM_VERSION", str(tmp_path / "nope"))
+        monkeypatch.setattr(zen_smu, "VERSION_PATH", str(tmp_path / "nope"))
         backend, note = zen_smu.probe(RealFS())
         assert backend is None
         assert "not loaded" in note
@@ -92,18 +93,18 @@ class TestProbe:
                                                        monkeypatch):
         p = tmp_path / "pm_table_version"
         p.write_bytes((0xDEADBEEF).to_bytes(4, "little"))
-        monkeypatch.setattr(zen_smu, "PM_VERSION", str(p))
+        monkeypatch.setattr(zen_smu, "VERSION_PATH", str(p))
         backend, note = zen_smu.probe(RealFS())
         assert backend is None
         assert "0xdeadbeef" in note
 
-    @pytest.mark.parametrize("version", [PM_VER_SUPPORTED,
-                                          PM_HALO_VER_SUPPORTED])
+    @pytest.mark.parametrize("version", [PHOENIX_VERSION,
+                                          STRIX_HALO_VERSION])
     def test_supported_version_is_accepted(self, tmp_path, monkeypatch,
                                            version):
         p = tmp_path / "pm_table_version"
         p.write_bytes(version.to_bytes(4, "little"))
-        monkeypatch.setattr(zen_smu, "PM_VERSION", str(p))
+        monkeypatch.setattr(zen_smu, "VERSION_PATH", str(p))
         backend, note = zen_smu.probe(RealFS())
         assert isinstance(backend, zen_smu.ZenSmuBackend)
         assert note == ""
@@ -113,5 +114,5 @@ class TestProbe:
 def test_supported_versions_are_the_verified_ones():
     """Bumping either of these without re-validating the field map is the
     mistake this whole program is arranged to prevent."""
-    assert set(PM_PROFILES) == {0x004C0009, 0x0064020C}
+    assert set(PROFILES) == {0x004C0009, 0x0064020C}
     assert (fields.GM_VERSION, fields.GM_SIZE) == ((2, 1), 120)

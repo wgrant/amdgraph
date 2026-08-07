@@ -19,8 +19,8 @@ def test_replay_reproduces_a_live_capture(tmp_path, monkeypatch, record):
     (smu / "pm_table_version").write_bytes((0x004C0009).to_bytes(4, "little"))
     (smu / "pm_table").write_bytes(b"\x00\x00\xf0\x41" * 704)   # all 30.0s
 
-    monkeypatch.setattr(zen_smu, "PM_VERSION", str(smu / "pm_table_version"))
-    monkeypatch.setattr(zen_smu, "PM_TABLE", str(smu / "pm_table"))
+    monkeypatch.setattr(zen_smu, "VERSION_PATH", str(smu / "pm_table_version"))
+    monkeypatch.setattr(zen_smu, "TABLE", str(smu / "pm_table"))
 
     fs = RecordingFS(RealFS())
     live, live_samples = record.capture(fs, n=3, interval=0.0)

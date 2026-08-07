@@ -12,9 +12,9 @@ import struct
 import pytest
 from conftest import gm_blob, pm_blob
 
-from amdgraph import fields
+from amdgraph import fields, pm_tables
 from amdgraph.backends import amdgpu, host, zen_smu
-from amdgraph.fields import PM_VER_SUPPORTED
+from amdgraph.pm_tables import PHOENIX_VERSION
 from amdgraph.sampler import Sampler
 from amdgraph.sysfs import HWMON, ReplayFS
 
@@ -36,8 +36,8 @@ class TestComposition:
 
     def test_meta_is_overwritten_when_zen_smu_applies(self):
         log = {
-            ("bytes", fields.PM_VERSION): [struct.pack("<I", PM_VER_SUPPORTED)],
-            ("bytes", fields.PM_TABLE): [pm_blob({})],
+            ("bytes", pm_tables.VERSION_PATH): [struct.pack("<I", PHOENIX_VERSION)],
+            ("bytes", pm_tables.TABLE): [pm_blob({})],
         }
         s = Sampler(fs=ReplayFS(log))
         try:
@@ -59,7 +59,7 @@ class TestReplayThroughSampler:
 
     def base_log(self):
         return {
-            ("bytes", fields.PM_VERSION): [struct.pack("<I", PM_VER_SUPPORTED)],
+            ("bytes", pm_tables.VERSION_PATH): [struct.pack("<I", PHOENIX_VERSION)],
             ("glob", fields.DRM_DEVICES): [[]],
             ("listdir", HWMON): [[]],
         }
@@ -70,7 +70,7 @@ class TestReplayThroughSampler:
         reads start failing on a Sampler that believes it is fine."""
         good = pm_blob({0: 30.0, 1: 20.0})
         log = self.base_log()
-        log[("bytes", fields.PM_TABLE)] = [good, None, good]
+        log[("bytes", pm_tables.TABLE)] = [good, None, good]
         s = Sampler(fs=ReplayFS(log))
         try:
             assert any(isinstance(b, zen_smu.ZenSmuBackend) for b in s.backends)

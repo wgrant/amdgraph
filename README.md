@@ -162,7 +162,7 @@ looks authoritative.
 Every index in the Phoenix map was checked against something independent — DRAM
 bandwidth correlated +0.997 against known traffic, per-core C0+C1+C6 summing to
 100%, mclk against the memory's rated speed, limits against `ryzenadj -i`. The
-comments in `src/amdgraph/fields.py` record that evidence, and are the most
+comments in `src/amdgraph/pm_table_*.py` record that evidence, and are the most
 valuable thing in the tree.
 
 To add a part, start by capturing what a new map has to be derived from:

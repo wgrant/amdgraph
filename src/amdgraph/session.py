@@ -12,7 +12,8 @@ import os
 
 import numpy as np
 
-from .fields import N_CORES, PM_PROFILES, THROTTLE_BITS
+from .fields import N_CORES, THROTTLE_BITS
+from .pm_tables import PROFILES
 from .store import Store
 
 DATA_DIR = os.path.join(
@@ -25,7 +26,7 @@ def record_keys():
     a recording you have to re-take because you did not log the column you now
     want is worse than a slightly larger file."""
     keys, core_bases = [], []
-    for scalars, cores, _ncores in PM_PROFILES.values():
+    for scalars, cores, _ncores in PROFILES.values():
         keys += list(scalars)
         core_bases += list(cores)
     for base in dict.fromkeys(core_bases):
