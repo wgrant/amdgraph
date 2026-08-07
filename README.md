@@ -231,3 +231,17 @@ Two rules worth keeping. Panes are declared in `panes.py`, which contains no
 drawing code — if a decision about *what* to show has landed anywhere else, it
 is in the wrong place. And any claim about a field belongs in a comment next to
 it, with the measurement that supports it.
+
+### Further reading
+
+| | |
+|---|---|
+| [`CLAUDE.md`](CLAUDE.md) | the house rules, in short — start here |
+| [`docs/DESIGN.md`](docs/DESIGN.md) | architecture, the layer contract, the source protocol |
+| [`docs/HARDWARE.md`](docs/HARDWARE.md) | what varies between AMD parts, and how to add one |
+| [`docs/DECISIONS.md`](docs/DECISIONS.md) | what was tried and rejected, with the measurements |
+
+`docs/HARDWARE.md` tags every claim as **measured**, **source** or
+**unverified**. That distinction is the discipline the project runs on: a field
+map transcribed from someone else's table looks identical in the source to one
+that was earned, and is worth much less.
