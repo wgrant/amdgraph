@@ -156,3 +156,28 @@ def test_decodes_strix_v3_and_differences_residencies(tmp_path):
         assert second["thr2"] == 1.0       # SPPT advanced
     finally:
         backend.close()
+
+
+def test_strix_v3_keeps_verified_pm_per_core_values(tmp_path):
+    """The PM C0/C1/C6 blocks are one synchronized 100% partition. When that
+    backend ran first, replacing C0 with a later gpu_metrics read broke the
+    identity even though each individual source was correct."""
+    path = tmp_path / "gpu_metrics"
+    path.write_bytes(gm3_blob())
+    backend = AmdGpuBackend(str(tmp_path), str(path), True, "", RealFS())
+    try:
+        out = {"core_c0_0": 12.5, "core_c0_mean": 20.0,
+               "core_power_0": 1.25, "core_power_sum": 10.0,
+               "core_temp_0": 42.5, "core_freq_0": 4321.0,
+               "core_freq_mean": 3000.0, "core_freq_max": 4321.0}
+        backend._metrics_v3(out, RealFS())
+        assert out["core_c0_0"] == 12.5
+        assert out["core_c0_mean"] == 20.0
+        assert out["core_power_0"] == 1.25
+        assert out["core_power_sum"] == 10.0
+        assert out["core_temp_0"] == 42.5
+        assert out["core_freq_0"] == 4321.0
+        assert out["core_freq_mean"] == 3000.0
+        assert out["core_freq_max"] == 4321.0
+    finally:
+        backend.close()

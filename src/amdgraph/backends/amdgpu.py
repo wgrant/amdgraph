@@ -229,7 +229,7 @@ class AmdGpuBackend(Backend):
         temps = u16(8, 16)
         for i, val in enumerate(temps):
             if val not in (0, 0xFFFF):
-                s[f"core_temp_{i}"] = val / 100.0
+                s.setdefault(f"core_temp_{i}", val / 100.0)
         skin = u16(40)[0]
         if skin not in (0, 0xFFFF):
             s["stt"] = skin / 100.0
@@ -244,10 +244,10 @@ class AmdGpuBackend(Backend):
             s["ipu_busy_mean"] = sum(valid_ipu) / len(valid_ipu)
         c0 = u16(62, 16)
         for i, val in enumerate(c0):
-            s[f"core_c0_{i}"] = self._valid(val)
+            s.setdefault(f"core_c0_{i}", self._valid(val))
         valid_c0 = [x for x in c0 if x != 0xFFFF]
         if valid_c0:
-            s["core_c0_mean"] = sum(valid_c0) / len(valid_c0)
+            s.setdefault("core_c0_mean", sum(valid_c0) / len(valid_c0))
         # The ABI says MB/s; chart units are GiB/s.
         s["dram_rd"] = self._valid(u16(GM3_DRAM_BW_OFF)[0], 1024.0)
         s["dram_wr"] = self._valid(u16(GM3_DRAM_BW_OFF + 2)[0], 1024.0)
@@ -260,9 +260,9 @@ class AmdGpuBackend(Backend):
                          ("pwr_gfx", GM3_GFX_PWR_OFF),
                          ("pwr_dgpu", GM3_DGPU_PWR_OFF),
                          ("core_power_sum", GM3_ALL_CORE_PWR_OFF)):
-            s[key] = self._valid(u32(off), 1000.0)
+            s.setdefault(key, self._valid(u32(off), 1000.0))
         for i, val in enumerate(u16(GM3_CORE_PWR_OFF, 16)):
-            s[f"core_power_{i}"] = self._valid(val, 1000.0)
+            s.setdefault(f"core_power_{i}", self._valid(val, 1000.0))
         s["pwr_system"] = self._valid(u16(GM3_SYS_PWR_OFF)[0], 1000.0)
         s.setdefault("stapm_lim", self._valid(
             u16(GM3_STAPM_CURRENT_LIMIT_OFF)[0], 1000.0))
@@ -277,11 +277,11 @@ class AmdGpuBackend(Backend):
             s[key] = self._valid(val)
         coreclks = u16(GM3_CORE_CLOCK_OFF, 16)
         for i, val in enumerate(coreclks):
-            s[f"core_freq_{i}"] = self._valid(val)
+            s.setdefault(f"core_freq_{i}", self._valid(val))
         valid_clks = [x for x in coreclks if x != 0xFFFF]
         if valid_clks:
-            s["core_freq_mean"] = sum(valid_clks) / len(valid_clks)
-            s["core_freq_max"] = max(valid_clks)
+            s.setdefault("core_freq_mean", sum(valid_clks) / len(valid_clks))
+            s.setdefault("core_freq_max", max(valid_clks))
         s["core_freq_limit"] = self._valid(u16(GM3_CORE_MAXFREQ_OFF)[0])
         s["gfx_clk_max"] = self._valid(u16(GM3_GFX_MAXFREQ_OFF)[0])
 
