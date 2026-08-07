@@ -420,6 +420,36 @@ class TestInteraction:
         assert (view.t0, view.t1) == before
 
     @pytest.mark.parametrize("kind", KINDS)
+    def test_the_crosshair_only_follows_over_the_plot(self, kind, view):
+        """The gutters are not part of the time axis. Tracking there asks the
+        store for a time outside the plotted range, it correctly answers None,
+        and every readout drops to "--" -- which reads as the values breaking
+        rather than as the pointer having left the data."""
+        w = make(kind, view)
+        r = w.plot_rect()
+        seen = []
+        w.cursorMoved.connect(seen.append)
+        move(w, r.center().x(), y=r.center().y())
+        assert seen[-1] is not None
+        for x, y, where in ((r.left() / 2, r.center().y(), "axis gutter"),
+                            (r.right() + 20, r.center().y(), "end labels"),
+                            (r.center().x(), r.bottom() + 4, "below the plot")):
+            move(w, x, y=y)
+            assert seen[-1] is None, f"cursor still tracking over {where}"
+
+    @pytest.mark.parametrize("kind", KINDS)
+    def test_a_drag_keeps_tracking_outside_the_plot(self, kind, view):
+        """Once a selection is under way the pointer is expected to wander."""
+        w = make(kind, view)
+        r = w.plot_rect()
+        seen = []
+        w.cursorMoved.connect(seen.append)
+        press(w, r.center().x(), y=r.center().y())
+        move(w, r.left() / 2, y=r.center().y())
+        assert seen[-1] is not None
+        assert w.drag_to is not None
+
+    @pytest.mark.parametrize("kind", KINDS)
     def test_leaving_mid_drag_keeps_the_crosshair(self, kind, view):
         w = make(kind, view)
         seen = []

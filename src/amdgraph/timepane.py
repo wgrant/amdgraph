@@ -120,10 +120,24 @@ class TimePane(QWidget):
     # -- interaction ------------------------------------------------------
 
     def mouseMoveEvent(self, ev):
+        """Track the crosshair over the plot; clear it everywhere else.
+
+        The gutters are not part of the time axis. Reading a value there means
+        asking the store for a time outside the plotted range, which correctly
+        answers None -- so every readout dropped to "--" the moment the pointer
+        crossed into the axis labels, and the fix looked like the values had
+        stopped working rather than like the cursor had left the data.
+
+        A drag is exempt: once a selection is under way the pointer is expected
+        to wander, and losing the crosshair mid-drag would be worse.
+        """
         t = self.t_of(ev.position().x())
         if self.drag_from is not None:
             self.drag_to = t
-        self.cursorMoved.emit(t)
+            self.cursorMoved.emit(t)
+            return
+        self.cursorMoved.emit(
+            t if self.plot_rect().contains(ev.position()) else None)
 
     def leaveEvent(self, _ev):
         if self.drag_from is None:
