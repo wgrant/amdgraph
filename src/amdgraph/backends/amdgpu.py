@@ -23,7 +23,7 @@ from ..fields import (AMD_VENDOR, DRM_DEVICES, GM_CORE_PWR_OFF, GM_PWR_OFF,
                      GM3_STAPM_CURRENT_LIMIT_OFF, GM3_STAPM_LIMIT_OFF,
                      GM3_SYS_PWR_OFF, GM3_VERSION, THROTTLE_BITS)
 from ..sysfs import RealFS, dpm_current, find_drm_device, find_hwmon
-from ..gpu_metrics import v3
+from ..gpu_metrics import v2, v3
 from .base import Backend
 
 
@@ -115,23 +115,9 @@ class ThrottleSampler:
         nxt = time.monotonic()
         while not self._stop.is_set():
             raw = self.fs.read_bytes(self.gpu_metrics)
-            try:
-                ts = (None if raw is None else
-                     struct.unpack_from("<I", raw, GM_THROTTLE_OFF)[0])
-            except struct.error:
-                ts = None
+            ts = v2.throttle_status(raw)
             if ts is not None:
-                sock, _cpu, soc, gfx = struct.unpack_from("<HHHH", raw,
-                                                          GM_PWR_OFF)
-                cores = struct.unpack_from("<8H", raw, GM_CORE_PWR_OFF)
-                # 0xFFFF is the SMU's "not populated" marker; drop those
-                # rather than plot 65.535 W.
-                def w(x):
-                    return None if x == 0xFFFF else x / 1000.0
-                pwr = {"pwr_socket": w(sock), "pwr_soc": w(soc),
-                       "pwr_gfxslot": w(gfx),
-                       "pwr_cores": sum(c for c in cores
-                                        if c != 0xFFFF) / 1000.0}
+                pwr = v2.power(raw)
                 with self._lock:
                     self._total += 1
                     self._raw |= ts
@@ -304,9 +290,9 @@ class AmdGpuBackend(Backend):
                 s[f"thr{bit}"] = duty.get(bit, 0.0)
             return
         buf = fs.read_bytes(self.gpu_metrics)
-        if buf is None or len(buf) < GM_THROTTLE_OFF + 4:
+        ts = v2.throttle_status(buf)
+        if ts is None:
             return
-        ts = struct.unpack_from("<I", buf, GM_THROTTLE_OFF)[0]
         s["throttle_raw"] = float(ts)
         s["throttle_n"] = 1.0
         for bit, _name, _fam in THROTTLE_BITS:

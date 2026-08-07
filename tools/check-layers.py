@@ -27,7 +27,8 @@ PKG_NAME = "amdgraph"
 
 # Module -> layer. Lower may not import higher.
 LAYER = {
-    "fields": 0, "model": 0, "sysfs": 0, "gpu_metrics.v3": 0,
+    "fields": 0, "model": 0, "sysfs": 0, "gpu_metrics.v2": 0,
+    "gpu_metrics.v3": 0,
     "smu.phoenix": 0,
     "smu.strix_halo": 0, "smu.strix_point": 0, "smu.pm_tables": 0,
     "backends.base": 1, "backends.host": 1, "backends.platform": 1,
@@ -45,6 +46,7 @@ LAYER = {
 ALLOWED_SAME_LAYER = {
     ("smu.pm_tables", "model"),
     ("gpu_metrics.v3", "fields"),
+    ("gpu_metrics.v2", "fields"),
     ("smu.pm_tables", "smu.phoenix"),
     ("smu.pm_tables", "smu.strix_halo"),
     ("smu.pm_tables", "smu.strix_point"),
