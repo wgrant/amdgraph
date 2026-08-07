@@ -39,11 +39,21 @@ class TestAssembly:
         assert main.axis.view is main.view
 
     def test_nothing_in_the_toolbar_steals_the_space_key(self, main):
+        """A focused button consumes Space before the shortcut sees it, and
+        Space is now the only way to freeze."""
         from PyQt6.QtCore import Qt
         from PyQt6.QtWidgets import QWidget
-        bar = main.centralWidget().layout().itemAt(0).widget()
-        for w in bar.findChildren(QWidget):
-            assert w.focusPolicy() == Qt.FocusPolicy.NoFocus
+        assert main.toolbar.focusPolicy() == Qt.FocusPolicy.NoFocus
+        for w in main.toolbar.findChildren(QWidget):
+            assert w.focusPolicy() == Qt.FocusPolicy.NoFocus, w
+
+    def test_the_toolbar_overflows_rather_than_forcing_a_width(self, main):
+        """The whole point of using a real QToolBar: below a certain width Qt
+        moves controls into an extension popup instead of refusing to shrink,
+        so the chrome stops setting the window's minimum."""
+        main.resize(320, 700)
+        main.show()
+        assert main.minimumSizeHint().width() <= 320
 
 
 class TestSections:
@@ -367,6 +377,26 @@ class TestShortcuts:
                 a.trigger()
                 return True
         return False
+
+    def test_space_survives_delivery_as_a_real_key(self, main):
+        """trigger() proves the action is wired; it does not prove the key
+        reaches it. The scroll area holds focus at startup and could plausibly
+        consume Space as page-down, and Space is now the only way to freeze."""
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtTest import QTest
+        from PyQt6.QtWidgets import QApplication
+        app = QApplication.instance()
+        main.show()
+        app.processEvents()
+        main.activateWindow()
+        main.setFocus()
+        app.processEvents()
+        QTest.keyClick(main, Qt.Key.Key_Space)
+        app.processEvents()
+        assert main.view.frozen
+        QTest.keyClick(main, Qt.Key.Key_Space)
+        app.processEvents()
+        assert not main.view.frozen
 
     def test_space_toggles_freeze_both_ways(self, main, source):
         assert self.press_key(main, "Space")

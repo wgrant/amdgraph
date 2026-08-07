@@ -13,11 +13,12 @@ import socket
 import time
 from datetime import datetime
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import QSize, Qt, QTimer
 from PyQt6.QtGui import QAction, QKeySequence
-from PyQt6.QtWidgets import (QComboBox, QFileDialog, QHBoxLayout,
-                             QInputDialog, QLabel, QMainWindow, QMessageBox,
-                             QPushButton, QScrollArea, QVBoxLayout, QWidget)
+from PyQt6.QtWidgets import (QComboBox, QFileDialog, QInputDialog, QLabel,
+                             QMainWindow, QMessageBox, QPushButton,
+                             QScrollArea, QSizePolicy, QToolBar, QVBoxLayout,
+                             QWidget)
 
 from . import render
 from .axis import TimeAxis
@@ -79,7 +80,13 @@ class Main(QMainWindow):
         lay = QVBoxLayout(root)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        lay.addWidget(self._build_toolbar())
+        # A real QToolBar, for one property that matters here: when the window
+        # is too narrow for every control, Qt moves the rest into an overflow
+        # popup instead of refusing to shrink. The chrome had been setting the
+        # window's minimum width outright -- 1108 px of it at one point -- and
+        # now nothing but the charts does.
+        self.toolbar = self._build_toolbar()
+        self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.toolbar)
 
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
@@ -139,6 +146,12 @@ class Main(QMainWindow):
             "QPushButton:checked{background:#1c3f6b;border-color:#3987e5;}"
             "QComboBox{background:#242429;border:1px solid #33333a;"
             "border-radius:4px;padding:2px 6px;}"
+            "QToolBar{background:#16161a;border:0;spacing:6px;"
+            "padding:6px 8px;}"
+            "QToolButton{background:#242429;border:1px solid #33333a;"
+            "border-radius:4px;padding:3px 8px;}"
+            "QToolButton:hover{background:#2d2d33;}"
+            "QToolButton:checked{background:#242429;border-color:#33333a;}"
             "QCheckBox{padding:2px;}")
 
         self._install_shortcuts()
@@ -171,10 +184,33 @@ class Main(QMainWindow):
         self.panes.append(pane)
 
     def _build_toolbar(self):
-        bar = QWidget()
-        h = QHBoxLayout(bar)
-        h.setContentsMargins(8, 6, 8, 6)
-        h.setSpacing(6)
+        bar = QToolBar("controls")
+        bar.setMovable(False)
+        bar.setFloatable(False)
+        bar.setIconSize(QSize(1, 1))          # no icons; text-only controls
+
+        class _Adder:
+            """addWidget/addSpacing, so the body below reads as it did under a
+            QHBoxLayout rather than being rewritten around QAction."""
+
+            @staticmethod
+            def addWidget(w):
+                bar.addWidget(w)
+
+            @staticmethod
+            def addSpacing(n):
+                sp = QWidget()
+                sp.setFixedWidth(n)
+                bar.addWidget(sp)
+
+            @staticmethod
+            def addStretch(_n=1):
+                sp = QWidget()
+                sp.setSizePolicy(QSizePolicy.Policy.Expanding,
+                                 QSizePolicy.Policy.Preferred)
+                bar.addWidget(sp)
+
+        h = _Adder()
 
         # Freeze, Reset and Follow used to have buttons here. Each duplicated a
         # single-key shortcut, and between them they were 174 px of a toolbar
@@ -240,7 +276,7 @@ class Main(QMainWindow):
         self.btn_golive.hide()
         h.addWidget(self.btn_golive)
 
-        # Nothing in the toolbar takes focus, so Space stays bound to Freeze
+        # Nothing in the toolbar takes focus, so Space stays bound to freeze
         # rather than re-triggering whichever button was clicked last.
         for w in bar.findChildren(QWidget):
             w.setFocusPolicy(Qt.FocusPolicy.NoFocus)

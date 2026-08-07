@@ -71,11 +71,14 @@ def move(w, x, y=40):
         Qt.KeyboardModifier.NoModifier))
 
 
-def wheel(w, x, dy):
-    w.wheelEvent(QWheelEvent(
-        QPointF(x, 40), QPointF(x, 40), QPoint(0, 0), QPoint(0, dy),
+def wheel(w, x, dy, y=None):
+    y = (w.plot_rect().top() + w.plot_rect().bottom()) / 2 if y is None else y
+    ev = QWheelEvent(
+        QPointF(x, y), QPointF(x, y), QPoint(0, 0), QPoint(0, dy),
         Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier,
-        Qt.ScrollPhase.NoScrollPhase, False))
+        Qt.ScrollPhase.NoScrollPhase, False)
+    w.wheelEvent(ev)
+    return ev
 
 
 class TestGutters:
@@ -286,6 +289,28 @@ class TestInteraction:
         wheel(w, 400, -120)
         assert view.t0 == pytest.approx(before[0])
         assert view.t1 == pytest.approx(before[1])
+
+    @pytest.mark.parametrize("kind", KINDS)
+    def test_the_wheel_only_zooms_over_the_plot(self, kind, view):
+        """Outside the plot the event must be ignored, so the scroll area gets
+        it. The column is over two screens tall; if every pane swallows the
+        wheel there is no way to scroll but the scrollbar."""
+        w = make(kind, view)
+        r = w.plot_rect()
+        before = (view.t0, view.t1)
+        for x, y, where in ((r.left() / 2, r.center().y(), "axis gutter"),
+                            (r.center().x(), 4, "header"),
+                            (r.right() + 20, r.center().y(), "end labels")):
+            ev = wheel(w, x, 120, y=y)
+            assert not ev.isAccepted(), f"wheel over the {where} was eaten"
+            assert (view.t0, view.t1) == before, where
+
+    @pytest.mark.parametrize("kind", KINDS)
+    def test_the_wheel_over_the_plot_is_taken(self, kind, view):
+        w = make(kind, view)
+        ev = wheel(w, w.plot_rect().center().x(), 120)
+        assert ev.isAccepted()
+        assert view.t1 - view.t0 < 300.0
 
     def test_zero_delta_wheel_does_nothing(self, view):
         w = make("chart", view)

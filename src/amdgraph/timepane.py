@@ -134,6 +134,17 @@ class TimePane(QWidget):
         anything to do with one; the strip charts have nothing to click."""
 
     def wheelEvent(self, ev):
+        """Zoom only over the plot itself; anywhere else scrolls the column.
+
+        Every pane used to swallow the wheel wherever the pointer was, which
+        meant the wheel could not scroll the pane column at all -- and the
+        column is over two screens tall, so that left the scrollbar as the only
+        way down. Over the axis gutter, the header or the end labels the event
+        is now ignored, which passes it to the scroll area.
+        """
+        if not self.plot_rect().contains(ev.position()):
+            ev.ignore()
+            return
         d = ev.angleDelta().y()
         if d:
             self.view.zoom_at(self.t_of(ev.position().x()),
