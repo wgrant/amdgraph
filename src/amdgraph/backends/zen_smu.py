@@ -1,9 +1,9 @@
 """Layer 1 -- the SMU's pm_table, via ryzen_smu.
 
 Sensor layouts are part-specific and undocumented, so this decodes only maps
-checked against live silicon: Phoenix 0x004C0009 and Strix Halo 0x0064020C.
-See fields.py for the evidence behind every index and docs/HARDWARE.md for what
-adding another part involves.
+checked against live silicon: Phoenix 0x004C0009, Renoir 0x00370005, Strix
+Halo 0x0064020C and Strix Point 0x005D0008/9. See fields.py for the evidence
+behind every index and docs/HARDWARE.md for what adding another part involves.
 
 May import: fields, sysfs, backends.base.
 """

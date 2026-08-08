@@ -29,9 +29,11 @@ mainline `amdgpu`.
 ## Currently supported
 
 **Ryzen 7 PRO 7840U (Phoenix), ThinkPad X13 Gen 4.** pm_table `0x004C0009`,
-`gpu_metrics_v2_1` (120 B), 8 cores, one L3 group; and **Ryzen AI MAX+ 395
-(Strix Halo), Framework Desktop**, pm_table `0x0064020C`,
-`gpu_metrics_v3_0` (264 B), 16 cores in two L3 groups.
+`gpu_metrics_v2_1` (120 B), 8 cores, one L3 group; **Ryzen 7 PRO 4750U
+(Renoir), ThinkPad X13 Gen 1**, pm_table `0x00370005` (562 floats), 8 cores,
+`gpu_metrics_v2_2` (128 B); and **Ryzen AI MAX+ 395 (Strix Halo), Framework
+Desktop**, pm_table `0x0064020C`, `gpu_metrics_v3_0` (264 B), 16 cores in two
+L3 groups.
 
 The PM-table maps in `src/amdgraph/smu/` are **measured**. What that meant:
 
@@ -66,6 +68,21 @@ at +0.882/+0.744. Per-core voltage is cross-checked by predicting a separate
 current block from power/voltage at +0.959. The current block remains unexposed
 because the platform has no independent rail-current sensor.
 
+The Renoir map is **measured** on the X13 Gen 1, and carries a documented
+seven-float skew vs. the renoir_tuning_utility map: `0x00370004` is 555 floats,
+`0x00370005` inserts seven VCN telemetry floats after MaxDramBW, and the tool's
+offsets are the unshifted layout, so everything from the per-core blocks onward
+sits seven higher on this part. Per-core slots earned by single-core burns
+(C0 + CC6 sums to 100% per slot, only the burned slot moves); core frequency is
+raw GHz against a 4.19 GHz `cpufreq` boost; tctl tracks `k10temp` (62–93 degC
+vs 71–90.5); FCLK/UCLK/MEMCLK hold the `pp_dpm_fclk` / `pp_dpm_mclk` current
+state under memory load. Deliberately unexposed, each with its reasoning in
+`renoir.py`: `gfx_clk` (reads 1.3–1.6 GHz while amdgpu's sclk state is
+400 MHz — not the actual clock), `dram_rd`/`dram_wr` (data-fabric counters that
+over-report by a factor that varies 1.2–5× with thread count), `cldo_vddp`
+(reads a constant 100), and indices 26/27 (FIT pair, the limit reads a garbage
+1234 and the pairing is unconfirmed).
+
 ## What varies, and how much
 
 Four independent axes. One `PM_VER_SUPPORTED` constant does not stretch across
@@ -77,7 +94,7 @@ them.
 
 | part | table version | note |
 |---|---|---|
-| Renoir / Lucienne | `0x0037xxxx` | |
+| Renoir / Lucienne | `0x00370005` | supported; `0004` is the pre-VCN layout the tuning tool's offsets assume |
 | Phoenix / Hawk Point | `0x004C0006`–`0x004C0009` | ours is `0009` |
 | Strix Point | `0x005D0008`–`0x005D0009` | Source-derived profile: modern RyzenAdj tests plus amkillam table/version support; not locally reproduced |
 | Strix Halo | `0x0064020C` | RyzenAdj: *"looks correct… defaults to 70W"*, and *"untested!"* on one accessor |
@@ -106,16 +123,29 @@ file. Do not copy those tables in and call the result supported.
 Three consequences:
 
 **Phoenix is the worst case, and we built on it.** `v2_1` is the only layout
-with neither `indep_throttle_status` nor residency counters. From `v2_2` the
-kernel fills an **ASIC-independent** 64-bit bitmask whose meanings are fixed in
-`swsmu/inc/amdgpu_smu.h` (`SMU_THROTTLER_*_BIT`) — so the hand-maintained
-`THROTTLE_BITS` table in `fields.py` is needed *only* for Phoenix.
+with neither `indep_throttle_status` nor residency counters, so the
+hand-maintained `THROTTLE_BITS` table in `fields.py` is needed only for it.
+From `v2_2` the kernel fills an **ASIC-independent** 64-bit bitmask whose
+meanings are fixed in `swsmu/inc/amdgpu_smu.h` (`SMU_THROTTLER_*_BIT`); Renoir
+is decoded from the `INDEP_THROTTLE_BITS` table in the same file, which
+transcribes each ASIC's `*_throttler_map[]` translation.
 
 That is a driver gap, not a hardware limit. Ten ppt files define a
 `*_throttler_map[]`; `smu_v13_0_4_ppt.c` does not. The per-bit constants already
 exist in `smu13_driver_if_v13_0_4.h`, and we have empirically validated their
 meanings. **A ~15-line upstream patch would fix Phoenix cap reasons in every
 tool that reads `indep_throttle_status`**, not just this one. Worth sending.
+
+**Renoir's `v2_2` is decoded from the independent mask, not the ASIC one.**
+Measured on the X13 Gen 1: the live blob is 128 bytes with header (2, 2), and
+its `indep_throttle_status` read `0x20` (`SMU_THROTTLER_FPPT_BIT`) in the same
+read whose ASIC `throttle_status` had FPPT set — the ASIC and independent twins
+asserting together, which pins the renoir throttler-map translation to the
+kernel's table. One unit trap surfaced here: `average_socket_power` is **W**,
+not the mW the struct comment claims, because `renoir_get_gpu_metrics` copies
+`CurrentSocketPower` raw while the `read_sensor` path applies the ×1000 gate
+(`fw >= 0x373200` / `0x40000f`); verified against hwmon `power1_input`
+(10 W both). CPU/soc/core powers stay mW.
 
 **Van Gogh picks its version at runtime from SMU firmware**
 (`vangogh_common_get_gpu_metrics`, `smu11/vangogh_ppt.c`):
@@ -218,7 +248,7 @@ Parts available for validation, in the order they are worth doing — Framework
 first because it isolates the platform axis, then the newer silicon where
 `gpu_metrics` does more of the work for us:
 
-Phoenix (Framework 13) · Renoir · Aerith · Sephiroth ·
+Phoenix (Framework 13) · Aerith · Sephiroth ·
 Granite Ridge.
 
 **Granite Ridge is arguably a different tool.** No STT, no skin governor, no

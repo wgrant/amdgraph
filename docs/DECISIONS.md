@@ -9,6 +9,46 @@ repeating it.
 
 ---
 
+### Renoir's pm_table is the 0x00370005 layout, seven floats past the tuning utility's
+
+The renoir_tuning_utility offsets read 0.37 GHz cores and 0 V where a live
+Renoir had real values, because its map is the 0x00370004 layout: 0x00370005
+inserts seven VCN telemetry floats after MaxDramBW, and the tool's own
+0x00370005 logging header lists them there while its sensor table still reads
+the old offsets. Every index in `smu/renoir.py` is the transcribed position
+plus seven, earned by single-core burns, `k10temp`/`pp_dpm_*`/`cpufreq`
+cross-checks. The unearnable remainder is deliberately absent: gfx_clk (SMU
+value disagrees with amdgpu's sclk state), dram_rd/dram_wr (data-fabric
+counters over-report by a factor that varies with thread count), the VCN
+fields (never exercised), cldo_vddp (constant 100).
+
+Rejected: transcribing the tool's offsets verbatim — a plausible wrong number
+on the per-core block, exactly what the verification rule exists to stop.
+
+---
+
+### Renoir's `gpu_metrics_v2_2` is decoded from the independent throttle mask
+
+The ASIC `throttle_status` bit layout is part-specific; the
+`indep_throttle_status` mask the kernel fills from v2_2 onward is
+`SMU_THROTTLER_*_BIT` and stable. Renoir therefore samples the independent
+mask through its throttler-map translation (`INDEP_THROTTLE_BITS` in
+`fields.py`), not the Phoenix bit table. Pinned on the X13 Gen 1: a 128 B blob
+with header (2, 2) whose `indep_throttle_status` read `0x20`
+(`SMU_THROTTLER_FPPT_BIT`) in the same read whose ASIC status had FPPT set.
+
+Unit trap earned the same way: `average_socket_power` is **W**, not the mW the
+struct comment claims, because `renoir_get_gpu_metrics` copies
+`CurrentSocketPower` raw while the `read_sensor` path applies the ×1000 gate
+(`fw >= 0x373200` / `0x40000f`). Verified against hwmon `power1_input`, both
+10 W. Core/soc/core powers stay mW.
+
+Rejected: decoding the ASIC bits with the Phoenix table, and treating socket
+power as mW — the latter is a quiet 1000× error, precisely the plausible wrong
+number this project is arranged to prevent.
+
+---
+
 ### Strix Halo pm_table fields are earned individually
 
 `gpu_metrics_v3_0` made Strix Halo useful without its undocumented PM table,

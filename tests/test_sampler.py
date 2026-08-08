@@ -66,9 +66,10 @@ class TestReplayThroughSampler:
     unmodified Sampler deterministically -- proving the guard holds a second
     time without needing the hardware to misbehave again.
 
-    No AMD device in either log: that keeps ThrottleSampler's background
-    thread out of the picture (gm_ok stays False, so it never starts), which
-    is what makes replay through the real Sampler deterministic here.
+    A refusal keeps ThrottleSampler's background thread out of the picture
+    (gm_ok stays False, so it never starts), which is what makes the refusal
+    replays deterministic. The one accepted-device replay reads a blob that
+    ReplayFS repeats on every poll, so its thread produces no surprises.
     """
 
     def base_log(self):
@@ -96,9 +97,10 @@ class TestReplayThroughSampler:
 
     def test_gpu_metrics_version_seen_live_still_refuses_on_replay(self):
         """A layout this build does not decode, captured from a real part
-        (v2_2 -- Renoir), replays as the same refusal it got live."""
+        (v2_4 -- Van Gogh on newer firmware), replays as the same refusal it
+        got live."""
         dev = "/sys/class/drm/card0/device"
-        seen_live = gm_blob(fmt_rev=2, cont_rev=2)
+        seen_live = gm_blob(fmt_rev=2, cont_rev=4)
         log = self.base_log()
         log[("glob", fields.DRM_DEVICES)] = [[dev]]
         log[("text", f"{dev}/vendor")] = [fields.AMD_VENDOR]
@@ -108,6 +110,25 @@ class TestReplayThroughSampler:
             gpu_backends = [b for b in s.backends
                            if isinstance(b, amdgpu.AmdGpuBackend)]
             assert gpu_backends and not gpu_backends[0].gm_ok
-            assert any("v2_2" in n for n in s.notes())
+            assert any("v2_4" in n for n in s.notes())
+        finally:
+            s.close()
+
+    def test_renoir_v2_2_captured_live_replays_as_decoded(self):
+        """The v2_2 blob this machine actually carries (128 B, ASIC FPPT bit
+        with its independent twin) replays as decoded, not refused."""
+        dev = "/sys/class/drm/card0/device"
+        seen_live = gm_blob(fmt_rev=2, cont_rev=2, size=128,
+                            throttle=0x02, indep=1 << 5)
+        log = self.base_log()
+        log[("glob", fields.DRM_DEVICES)] = [[dev]]
+        log[("text", f"{dev}/vendor")] = [fields.AMD_VENDOR]
+        log[("bytes", f"{dev}/gpu_metrics")] = [seen_live]
+        s = Sampler(fs=ReplayFS(log))
+        try:
+            gpu_backends = [b for b in s.backends
+                           if isinstance(b, amdgpu.AmdGpuBackend)]
+            assert gpu_backends and gpu_backends[0].gm_ok
+            assert not s.notes()
         finally:
             s.close()

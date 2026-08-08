@@ -66,7 +66,7 @@ def qapp():
 # -- synthetic blobs -------------------------------------------------------
 
 def gm_blob(fmt_rev=2, cont_rev=1, size=120, throttle=0, socket=20000,
-            soc=2000, cores=(1000,) * 8):
+            soc=2000, cores=(1000,) * 8, indep=0):
     """A gpu_metrics blob with a chosen header, for the version guards."""
     from amdgraph import fields
     b = bytearray(size)
@@ -76,6 +76,8 @@ def gm_blob(fmt_rev=2, cont_rev=1, size=120, throttle=0, socket=20000,
         struct.pack_into("<8H", b, fields.GM_CORE_PWR_OFF, *cores)
     if size >= fields.GM_THROTTLE_OFF + 4:
         struct.pack_into("<I", b, fields.GM_THROTTLE_OFF, throttle)
+    if size >= fields.GM_INDEP_THROTTLE_OFF + 8:
+        struct.pack_into("<Q", b, fields.GM_INDEP_THROTTLE_OFF, indep)
     return bytes(b)
 
 

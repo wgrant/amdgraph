@@ -12,7 +12,7 @@ from amdgraph import fields
 from amdgraph.backends import zen_smu
 from amdgraph.fields import MAX_CORE_SLOTS
 from amdgraph.normalize import normalize
-from amdgraph.smu.pm_tables import (PHOENIX_VERSION, PROFILES,
+from amdgraph.smu.pm_tables import (PHOENIX_VERSION, PROFILES, RENOIR_VERSION,
                                    STRIX_HALO_VERSION, STRIX_POINT_VERSIONS)
 from amdgraph.sysfs import MemoryFS, RealFS
 
@@ -62,6 +62,35 @@ class TestPmDecode:
         s = decode({0: 30.0, 1: 20.0, 4: 25.0, 5: 24.0})
         assert s["stapm_head"] == pytest.approx(10.0)
         assert s["ppt_slow_head"] == pytest.approx(1.0)
+
+    def test_renoir_scalars_cores_and_clock_scaling(self, tmp_path,
+                                                     monkeypatch):
+        values = {0: 12.5, 1: 7.0, 16: 96.0, 17: 72.3, 101: 0.743,
+                  378: 1200.0, 379: 1200.0, 380: 1200.0}
+        for i in range(8):
+            values.update({199 + i: i + 1.0, 207 + i: 0.9,
+                           215 + i: 50.0 + i, 239 + i: 4.0,
+                           247 + i: 3.5, 255 + i: 90.0 - i,
+                           271 + i: float(i)})
+        p = tmp_path / "pm_table"
+        p.write_bytes(pm_blob(values, size=562))
+        monkeypatch.setattr(zen_smu, "TABLE", str(p))
+        s = {}
+        zen_smu.ZenSmuBackend(RENOIR_VERSION).sample(s, RealFS())
+        s["core_count"] = 8.0
+        normalize(s)
+        assert s["stapm"] == pytest.approx(7.0, abs=1e-4)
+        assert s["stapm_lim"] == pytest.approx(12.5, abs=1e-4)
+        assert s["tctl"] == pytest.approx(72.3, abs=1e-4)
+        assert s["tctl_lim"] == pytest.approx(96.0, abs=1e-4)
+        assert s["vddcr_soc"] == pytest.approx(0.743, abs=1e-4)
+        assert s["fclk"] == pytest.approx(1200.0, abs=1e-4)
+        assert s["mclk"] == pytest.approx(1200.0, abs=1e-4)
+        assert s["core_freq_0"] == pytest.approx(4000.0, abs=1e-3)   # GHz -> MHz
+        assert s["core_temp_7"] == pytest.approx(57.0, abs=1e-4)
+        assert s["core_c0_0"] == pytest.approx(90.0, abs=1e-4)
+        assert s["core_power_sum"] == pytest.approx(36.0)
+        assert "gfx_clk" not in s and "dram_rd" not in s
 
     def test_strix_halo_scalars_cores_residency_and_derived_values(
             self, tmp_path, monkeypatch):
@@ -137,7 +166,7 @@ class TestProbe:
         assert backend is None
         assert "0xdeadbeef" in note
 
-    @pytest.mark.parametrize("version", [PHOENIX_VERSION,
+    @pytest.mark.parametrize("version", [PHOENIX_VERSION, RENOIR_VERSION,
                                           STRIX_HALO_VERSION,
                                           *STRIX_POINT_VERSIONS])
     def test_supported_version_is_accepted(self, tmp_path, monkeypatch,
@@ -154,6 +183,6 @@ class TestProbe:
 def test_supported_versions_are_the_verified_ones():
     """Bumping either of these without re-validating the field map is the
     mistake this whole program is arranged to prevent."""
-    assert set(PROFILES) == {0x004C0009, 0x005D0008, 0x005D0009,
-                             0x0064020C}
+    assert set(PROFILES) == {0x004C0009, 0x00370005, 0x005D0008,
+                             0x005D0009, 0x0064020C}
     assert (fields.GM_VERSION, fields.GM_SIZE) == ((2, 1), 120)

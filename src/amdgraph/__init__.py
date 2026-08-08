@@ -30,8 +30,9 @@ Requires PyQt6 and the ryzen_smu kernel module (SMU panes degrade to empty
 without it; hwmon and cpufreq panes still work).
 
 Sensor layouts are part-specific and undocumented, so amdgraph decodes only what
-has been checked against live silicon: pm_table 0x004C0009 and gpu_metrics v2_1,
-as found on Ryzen 7040-series (Phoenix). On anything else the affected panes stay
+has been checked against live silicon: pm_table 0x004C0009 (Phoenix),
+0x00370005 (Renoir) and 0x0064020C (Strix Halo), and gpu_metrics v2_1/v2_2/v3_0. On
+anything else the affected panes stay
 empty and the status bar names the version it found, rather than showing numbers
 read from the wrong offsets. See docs/HARDWARE.md for what adding a part
 involves.

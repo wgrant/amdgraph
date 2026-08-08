@@ -5,12 +5,13 @@ from typing import Optional, Tuple
 
 from ..model import FieldMap
 
-from . import phoenix, strix_halo, strix_point
+from . import phoenix, renoir, strix_halo, strix_point
 
 TABLE = "/sys/kernel/ryzen_smu_drv/pm_table"
 VERSION_PATH = "/sys/kernel/ryzen_smu_drv/pm_table_version"
 
 PHOENIX_VERSION = phoenix.VERSION
+RENOIR_VERSION = renoir.VERSION
 STRIX_HALO_VERSION = strix_halo.VERSION
 STRIX_POINT_VERSIONS = strix_point.VERSIONS
 
@@ -30,6 +31,8 @@ class PmTableLayout:
 
 PHOENIX = PmTableLayout((phoenix.VERSION,), phoenix.SCALARS, phoenix.CORES,
                         phoenix.NCORES)
+RENOIR = PmTableLayout((renoir.VERSION,), renoir.SCALARS, renoir.CORES,
+                       renoir.NCORES)
 STRIX_HALO = PmTableLayout(
     (strix_halo.VERSION,), strix_halo.SCALARS, strix_halo.CORES,
     strix_halo.NCORES,
@@ -43,6 +46,7 @@ STRIX_POINT = PmTableLayout(
     provenance="source-derived")
 
 PROFILES = {version: PHOENIX for version in PHOENIX.versions}
+PROFILES.update({version: RENOIR for version in RENOIR.versions})
 PROFILES.update({version: STRIX_HALO for version in STRIX_HALO.versions})
 for version in strix_point.VERSIONS:
     PROFILES[version] = STRIX_POINT

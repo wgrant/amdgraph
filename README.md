@@ -150,7 +150,8 @@ nothing the SMU does not already report more precisely.
 ## Hardware support
 
 Decoded and verified on **Ryzen 7 PRO 7840U (Phoenix)**: pm_table
-`0x004C0009`, `gpu_metrics_v2_1`; and **Ryzen AI MAX+ 395 (Strix Halo)**:
+`0x004C0009`, `gpu_metrics_v2_1`; **Ryzen 7 PRO 4750U (Renoir)**: pm_table
+`0x00370005`, `gpu_metrics_v2_2` (128 B); and **Ryzen AI MAX+ 395 (Strix Halo)**:
 `pm_table 0x0064020C`, `gpu_metrics_v3_0` (264 B). Strix Halo provides moving
 STAPM/PPT budgets, per-core power/voltage/temperature/clock/C0/C1/C6, thermal
 ceilings, package/APU/GPU/IPU power, bandwidth and cap-reason activity.
@@ -215,8 +216,8 @@ environment, and a bare checkout where `conftest.py` falls back to putting
 
 They are weighted toward the guards rather than the arithmetic. The one failure
 this program is built to avoid is printing a plausible number off a layout
-nobody verified, so the tests asserting that it *refuses* — v2_2, v2_4, v3_0,
-v1_3, right version wrong size, truncated, absent — carry more weight than any
+nobody verified, so the tests asserting that it *refuses* — v2_4, v3_0, v1_3,
+right version wrong size, truncated, absent — carry more weight than any
 that check a decode.
 
 ## Persistent service and terminal client

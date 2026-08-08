@@ -1,9 +1,9 @@
 """Layer 1 -- the AMD GPU: gpu_metrics, and its plain hwmon/DPM sensors.
 
 Sensor layouts are part-specific and undocumented, so this decodes only what
-has been checked against live silicon: gpu_metrics v2_1, as found on
-Ryzen 7040-series (Phoenix). See docs/HARDWARE.md for what adding a part
-involves and fields.py for the evidence behind every offset below.
+has been checked against live silicon: gpu_metrics v2_1 (Phoenix), v2_2
+(Renoir) and v3_0 (Strix Point/Halo). See docs/HARDWARE.md for what adding a
+part involves and fields.py for the evidence behind every offset below.
 
 May import: fields, sysfs, backends.base.
 """
@@ -13,15 +13,16 @@ import threading
 import time
 
 from ..fields import (AMD_VENDOR, DRM_DEVICES, GM_CORE_PWR_OFF, GM_PWR_OFF,
-                     GM_SIZE, GM_THROTTLE_OFF, GM_VERSION, GM3_ACTIVITY_OFF,
-                     GM3_ALL_CORE_PWR_OFF, GM3_APU_PWR_OFF, GM3_CLOCKS_OFF,
-                     GM3_CORE_CLOCK_OFF, GM3_CORE_MAXFREQ_OFF,
-                     GM3_CORE_PWR_OFF, GM3_DGPU_PWR_OFF, GM3_DRAM_BW_OFF,
-                     GM3_GFX_MAXFREQ_OFF, GM3_GFX_PWR_OFF,
-                     GM3_IPU_ACTIVITY_OFF, GM3_IPU_BW_OFF, GM3_IPU_PWR_OFF,
-                     GM3_RESIDENCY_OFF, GM3_SIZE, GM3_SOCKET_PWR_OFF,
-                     GM3_STAPM_CURRENT_LIMIT_OFF, GM3_STAPM_LIMIT_OFF,
-                     GM3_SYS_PWR_OFF, GM3_VERSION, THROTTLE_BITS)
+                      GM_SIZE, GM_THROTTLE_OFF, GM_VERSION, GM2_2_SIZE,
+                      GM2_2_VERSION, GM3_ACTIVITY_OFF, GM3_ALL_CORE_PWR_OFF,
+                      GM3_APU_PWR_OFF, GM3_CLOCKS_OFF, GM3_CORE_CLOCK_OFF,
+                      GM3_CORE_MAXFREQ_OFF, GM3_CORE_PWR_OFF, GM3_DGPU_PWR_OFF,
+                      GM3_DRAM_BW_OFF, GM3_GFX_MAXFREQ_OFF, GM3_GFX_PWR_OFF,
+                      GM3_IPU_ACTIVITY_OFF, GM3_IPU_BW_OFF, GM3_IPU_PWR_OFF,
+                      GM3_RESIDENCY_OFF, GM3_SIZE, GM3_SOCKET_PWR_OFF,
+                      GM3_STAPM_CURRENT_LIMIT_OFF, GM3_STAPM_LIMIT_OFF,
+                      GM3_SYS_PWR_OFF, GM3_VERSION, INDEP_THROTTLE_BITS,
+                      THROTTLE_BITS)
 from ..sysfs import RealFS, dpm_current, find_drm_device, find_hwmon
 from ..gpu_metrics import v2, v3
 from .base import Backend
@@ -35,8 +36,8 @@ def check_gpu_metrics(path, fs):
     The version reported here is worth reading rather than working around:
     v2_2 and later carry indep_throttle_status, an ASIC-independent bitmask
     the kernel fills in, and v3_0 replaces the bitmask with per-reason
-    residency counters. This build decodes v2_1, the one layout that has
-    neither and therefore needs the hand-checked bit table in fields.py.
+    residency counters. This build decodes v2_1 (the hand-checked bit table
+    in fields.py), v2_2 (the kernel-declared mask) and v3_0 (residency).
     """
     if not path:
         return False, "no amdgpu device found — no cap reasons"
@@ -47,11 +48,13 @@ def check_gpu_metrics(path, fs):
         return False, "gpu_metrics too short — no cap reasons"
     size, fmt_rev, cont_rev = struct.unpack_from("<HBB", raw, 0)
     supported = (((fmt_rev, cont_rev) == GM_VERSION and size == GM_SIZE) or
-                 ((fmt_rev, cont_rev) == GM3_VERSION and size == GM3_SIZE))
+                 ((fmt_rev, cont_rev) == GM2_2_VERSION and size == GM2_2_SIZE)
+                 or ((fmt_rev, cont_rev) == GM3_VERSION and size == GM3_SIZE))
     if not supported:
         return False, (f"gpu_metrics v{fmt_rev}_{cont_rev} ({size}B) is not "
                        f"decoded (this build maps v{GM_VERSION[0]}_"
-                       f"{GM_VERSION[1]} and v{GM3_VERSION[0]}_"
+                       f"{GM_VERSION[1]}, v{GM2_2_VERSION[0]}_"
+                       f"{GM2_2_VERSION[1]} and v{GM3_VERSION[0]}_"
                        f"{GM3_VERSION[1]}) — no cap reasons")
     return True, ""
 
@@ -74,12 +77,21 @@ class ThrottleSampler:
     but tunable, and set to 1 Hz it degrades to the old instantaneous sample.
     """
 
-    def __init__(self, gpu_metrics, fs=None, hz=20.0):
+    def __init__(self, gpu_metrics, fs=None, hz=20.0, *, bits=None, reader=None,
+                 power_fn=None):
         self.gpu_metrics = gpu_metrics
         self.fs = fs or RealFS()
         self.hz = hz
         self._lock = threading.Lock()
-        self._counts = {b: 0.0 for b, _n, _f in THROTTLE_BITS}
+        # `bits` is the per-row bit position to test in the mask `reader`
+        # returns: the ASIC-dependent bits 0-12 for v2_1 (Phoenix), the
+        # ASIC-independent SMU_THROTTLER positions for v2_2 (Renoir). Rows
+        # keep the THROTTLE_BITS display order either way, so the panes never
+        # change. `power_fn` carries the per-version power decode.
+        self._bits = tuple(b for b, _n, _f in (bits or THROTTLE_BITS))
+        self._reader = reader or v2.throttle_status
+        self._power_fn = power_fn or v2.power
+        self._counts = {i: 0.0 for i in range(len(self._bits))}
         self._total = 0
         self._raw = 0
         self._stop = threading.Event()
@@ -115,16 +127,16 @@ class ThrottleSampler:
         nxt = time.monotonic()
         while not self._stop.is_set():
             raw = self.fs.read_bytes(self.gpu_metrics)
-            ts = v2.throttle_status(raw)
+            ts = self._reader(raw)
             if ts is not None:
-                pwr = v2.power(raw)
+                pwr = self._power_fn(raw)
                 with self._lock:
                     self._total += 1
                     self._raw |= ts
                     self._pwr = pwr
-                    for b in self._counts:
-                        if (ts >> b) & 1:
-                            self._counts[b] += 1.0
+                    for i, bit in enumerate(self._bits):
+                        if (ts >> bit) & 1:
+                            self._counts[i] += 1.0
             nxt += period
             delay = nxt - time.monotonic()
             if delay < 0:                 # fell behind; resync rather than spin
@@ -182,9 +194,25 @@ class AmdGpuBackend(Backend):
         raw = fs.read_bytes(gpu_metrics) if gm_ok else None
         self.gm_version = tuple(raw[2:4]) if raw and len(raw) >= 4 else None
         # v3 has hardware-maintained residency counters and must not run the
-        # Phoenix high-rate instantaneous-bit poller.
-        poll_path = gpu_metrics if self.gm_version == GM_VERSION else None
-        self.throttle = ThrottleSampler(poll_path, fs)
+        # v2-family high-rate instantaneous-bit poller.
+        if self.gm_version == GM_VERSION:
+            bits = THROTTLE_BITS
+            reader = v2.throttle_status
+            power_fn = v2.power
+            poll_path = gpu_metrics
+        elif self.gm_version == GM2_2_VERSION:
+            # Renoir's socket power arrives in W, not mW -- see fields.py.
+            bits = INDEP_THROTTLE_BITS
+            reader = v2.indep_throttle_status
+            power_fn = lambda raw: v2.power(raw, socket_scale=1.0)
+            poll_path = gpu_metrics
+        else:
+            bits = reader = power_fn = None
+            poll_path = None
+        self.gm_bits = tuple(b for b, _n, _f in bits) if bits else ()
+        self.gm_reader = reader or v2.throttle_status
+        self.throttle = ThrottleSampler(poll_path, fs, bits=bits,
+                                        reader=reader, power_fn=power_fn)
         self._residency_prev = None
         self.throttle.start()
 
@@ -286,17 +314,17 @@ class AmdGpuBackend(Backend):
         if duty is not None:
             s["throttle_raw"] = float(raw)
             s["throttle_n"] = float(n)
-            for bit, _name, _fam in THROTTLE_BITS:
-                s[f"thr{bit}"] = duty.get(bit, 0.0)
+            for i, (bit, _name, _fam) in enumerate(THROTTLE_BITS):
+                s[f"thr{bit}"] = duty.get(i, 0.0)
             return
         buf = fs.read_bytes(self.gpu_metrics)
-        ts = v2.throttle_status(buf)
+        ts = self.gm_reader(buf)
         if ts is None:
             return
         s["throttle_raw"] = float(ts)
         s["throttle_n"] = 1.0
-        for bit, _name, _fam in THROTTLE_BITS:
-            s[f"thr{bit}"] = float((ts >> bit) & 1)
+        for i, (bit, _name, _fam) in enumerate(THROTTLE_BITS):
+            s[f"thr{bit}"] = float((ts >> self.gm_bits[i]) & 1)
 
     def set_cap_rate(self, hz):
         self.throttle.set_rate(hz)
